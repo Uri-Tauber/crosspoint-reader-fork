@@ -75,6 +75,7 @@ class ChapterHtmlSlimParser {
   int currentFootnoteLinkTextLen = 0;
   char currentFootnoteLinkHref[64] = {};
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
+  std::vector<std::string> pendingAnchors;
   int wordsExtractedInBlock = 0;
 
   void updateEffectiveInlineStyle();

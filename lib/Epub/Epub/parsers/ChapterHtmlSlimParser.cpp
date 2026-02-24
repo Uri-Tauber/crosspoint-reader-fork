@@ -160,6 +160,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         classAttr = atts[i + 1];
       } else if (strcmp(atts[i], "style") == 0) {
         styleAttr = atts[i + 1];
+      } else if (strcmp(atts[i], "id") == 0) {
+        self->pendingAnchors.emplace_back(atts[i + 1]);
       }
     }
   }
@@ -397,6 +399,12 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 }
                 self->currentPage->elements.push_back(pageImage);
                 self->currentPageNextY += displayHeight;
+
+                if (!self->pendingAnchors.empty()) {
+                  self->currentPage->anchors.insert(self->currentPage->anchors.end(), self->pendingAnchors.begin(),
+                                                    self->pendingAnchors.end());
+                  self->pendingAnchors.clear();
+                }
 
                 self->depth += 1;
                 return;
@@ -1003,6 +1011,11 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int16_t xOffset = line->getBlockStyle().leftInset();
   currentPage->elements.push_back(std::make_shared<PageLine>(line, xOffset, currentPageNextY));
   currentPageNextY += lineHeight;
+
+  if (!pendingAnchors.empty()) {
+    currentPage->anchors.insert(currentPage->anchors.end(), pendingAnchors.begin(), pendingAnchors.end());
+    pendingAnchors.clear();
+  }
 }
 
 void ChapterHtmlSlimParser::makePages() {

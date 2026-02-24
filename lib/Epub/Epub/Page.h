@@ -58,6 +58,7 @@ class Page {
   // the list of block index and line numbers on this page
   std::vector<std::shared_ptr<PageElement>> elements;
   std::vector<FootnoteEntry> footnotes;
+  std::vector<std::string> anchors;
 
   void addFootnote(const char* number, const char* href) {
     if (footnotes.size() >= 16) return;  // Cap per-page footnotes

@@ -13,11 +13,14 @@ class Section {
   GfxRenderer& renderer;
   std::string filePath;
   FsFile file;
+  std::vector<std::pair<std::string, uint16_t>> anchors;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
                               bool embeddedStyle);
   uint32_t onPageComplete(std::unique_ptr<Page> page);
+  bool saveAnchorIndex() const;
+  bool loadAnchorIndex();
 
  public:
   uint16_t pageCount = 0;
@@ -36,4 +39,5 @@ class Section {
                          uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
                          const std::function<void()>& popupFn = nullptr);
   std::unique_ptr<Page> loadPageFromSectionFile();
+  int getPageForAnchor(const std::string& anchor);
 };

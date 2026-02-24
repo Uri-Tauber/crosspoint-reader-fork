@@ -876,10 +876,24 @@ void EpubReaderActivity::navigateToHref(const char* href, const bool savePositio
     return;
   }
 
+  int targetPageNumber = 0;
+  size_t hashPos = hrefStr.find('#');
+  if (hashPos != std::string::npos) {
+    std::string anchor = hrefStr.substr(hashPos + 1);
+    if (!anchor.empty()) {
+      Section tempSection(epub, targetSpineIndex, renderer);
+      int p = tempSection.getPageForAnchor(anchor);
+      if (p >= 0) {
+        targetPageNumber = p;
+        LOG_DBG("ERS", "Resolved anchor '%s' to page %d", anchor.c_str(), p);
+      }
+    }
+  }
+
   {
     RenderLock lock(*this);
     currentSpineIndex = targetSpineIndex;
-    nextPageNumber = 0;
+    nextPageNumber = targetPageNumber;
     section.reset();
   }
   requestUpdate();
