@@ -178,5 +178,10 @@ bool Markdown::readContent(uint8_t* buffer, size_t offset, size_t length) const 
   size_t bytesRead = file.read(buffer, length);
   file.close();
 
-  return bytesRead > 0;
+  if (bytesRead != length) {
+    LOG_ERR("MD", "Short read at offset %zu: got %zu, expected %zu", offset, bytesRead, length);
+    return false;
+  }
+
+  return true;
 }

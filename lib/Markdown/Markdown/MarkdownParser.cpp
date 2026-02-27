@@ -9,9 +9,29 @@
 namespace {
 bool isWhitespaceChar(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
 
-// Maximum file size we'll attempt to parse (512 KB).
-// MD4C requires the entire file in contiguous memory.
-constexpr size_t MAX_MARKDOWN_SIZE = 512 * 1024;
+constexpr size_t MAX_CHUNK_SIZE = 32 * 1024;               // 32KB buffer for chunked parsing
+constexpr size_t CHUNK_BREAK_SCAN_WINDOW = 1024;           // Scan only the tail of each chunk for delimiters
+constexpr size_t TEXT_BLOCK_SPLIT_WORD_THRESHOLD = 750;    // Limit buffered words before layout
+
+size_t findSafeChunkBreak(const uint8_t* buffer, const size_t chunkSize) {
+  const size_t scanLimit = (chunkSize > CHUNK_BREAK_SCAN_WINDOW) ? chunkSize - CHUNK_BREAK_SCAN_WINDOW : 0;
+
+  // Prefer paragraph boundary
+  for (size_t i = chunkSize; i > scanLimit; i--) {
+    if (i >= 2 && buffer[i - 1] == '\n' && buffer[i - 2] == '\n') {
+      return i;
+    }
+  }
+
+  // Fall back to line boundary
+  for (size_t i = chunkSize; i > scanLimit; i--) {
+    if (i >= 1 && buffer[i - 1] == '\n') {
+      return i;
+    }
+  }
+
+  return chunkSize;
+}
 }  // namespace
 
 EpdFontFamily::Style MarkdownParser::getCurrentFontStyle() const {
@@ -366,8 +386,8 @@ int MarkdownParser::textCallback(int textType, const char* text, unsigned size, 
     self->partWordBuffer[self->partWordBufferIndex++] = text[i];
   }
 
-  // If we have > 750 words buffered, perform layout to free memory
-  if (self->currentTextBlock && self->currentTextBlock->size() > 750) {
+  // If we have too many words buffered, perform layout to free memory
+  if (self->currentTextBlock && self->currentTextBlock->size() > TEXT_BLOCK_SPLIT_WORD_THRESHOLD) {
     LOG_DBG("MDP", "Text block too long, splitting");
     const int horizontalInset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
     const uint16_t effectiveWidth = (horizontalInset < self->viewportWidth)
@@ -388,25 +408,16 @@ bool MarkdownParser::parseAndBuildPages() {
   }
 
   const size_t fileSize = markdown->getFileSize();
-  if (fileSize > MAX_MARKDOWN_SIZE) {
-    LOG_ERR("MDP", "File too large: %zu bytes (max %zu)", fileSize, MAX_MARKDOWN_SIZE);
-    return false;
-  }
+  size_t offset = 0;
 
-  auto* buffer = static_cast<uint8_t*>(malloc(fileSize + 1));
+  // Allocate chunk buffer
+  auto buffer = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[MAX_CHUNK_SIZE + 1]);
   if (!buffer) {
-    LOG_ERR("MDP", "Failed to allocate %zu bytes", fileSize);
+    LOG_ERR("MDP", "Failed to allocate chunk buffer");
     return false;
   }
 
-  if (!markdown->readContent(buffer, 0, fileSize)) {
-    LOG_ERR("MDP", "Failed to read file content");
-    free(buffer);
-    return false;
-  }
-  buffer[fileSize] = '\0';
-
-  LOG_DBG("MDP", "Parsing %zu bytes of markdown", fileSize);
+  LOG_DBG("MDP", "Parsing %zu bytes of markdown in chunks", fileSize);
 
   // Initialize parser state
   boldDepth = 0;
@@ -422,7 +433,7 @@ bool MarkdownParser::parseAndBuildPages() {
   // Setup MD4C parser
   MD_PARSER parser = {};
   parser.abi_version = 0;
-  parser.flags = MD_DIALECT_COMMONMARK;
+  parser.flags = MD_DIALECT_GITHUB;  // Enables tables/strikethrough/task-list parsing
   parser.enter_block = reinterpret_cast<int (*)(MD_BLOCKTYPE, void*, void*)>(enterBlockCallback);
   parser.leave_block = reinterpret_cast<int (*)(MD_BLOCKTYPE, void*, void*)>(leaveBlockCallback);
   parser.enter_span = reinterpret_cast<int (*)(MD_SPANTYPE, void*, void*)>(enterSpanCallback);
@@ -431,16 +442,48 @@ bool MarkdownParser::parseAndBuildPages() {
   parser.debug_log = nullptr;
   parser.syntax = nullptr;
 
-  int result = md_parse(reinterpret_cast<const char*>(buffer), static_cast<unsigned>(fileSize), &parser, this);
-  free(buffer);
+  while (offset < fileSize) {
+    // Determine chunk size
+    size_t chunkSize = std::min(MAX_CHUNK_SIZE, fileSize - offset);
 
-  if (result != 0) {
-    LOG_ERR("MDP", "md_parse failed with code %d", result);
-    return false;
+    if (!markdown->readContent(buffer.get(), offset, chunkSize)) {
+      LOG_ERR("MDP", "Failed to read file content at offset %zu", offset);
+      return false;
+    }
+
+    // Find a safe break point to reduce split artifacts between md_parse() calls.
+    size_t effectiveSize = chunkSize;
+    if (offset + chunkSize < fileSize) {  // If not the last chunk
+      effectiveSize = findSafeChunkBreak(buffer.get(), chunkSize);
+    }
+
+    buffer[effectiveSize] = '\0';
+
+    int result =
+        md_parse(reinterpret_cast<const char*>(buffer.get()), static_cast<unsigned>(effectiveSize), &parser, this);
+
+    if (result != 0) {
+      LOG_ERR("MDP", "md_parse failed with code %d at offset %zu", result, offset);
+      return false;
+    }
+    
+    // Process any remaining partial words at end of chunk
+    // Note: md4c might leave us in a state (e.g. open block), which is lost between chunks.
+    // This is a limitation of chunked parsing with a non-streaming parser.
+    flushPartWordBuffer();
+    boldDepth = 0;
+    italicDepth = 0;
+    headerLevel = 0;
+    inListItem = false;
+    firstListItemWord = false;
+
+    offset += effectiveSize;
+
+    // Yield to avoid WDT reset during long parsing
+    vTaskDelay(1);
   }
 
-  // Process remaining content
-  flushPartWordBuffer();
+  // Final flush
   if (currentTextBlock && !currentTextBlock->isEmpty()) {
     makePages();
   }

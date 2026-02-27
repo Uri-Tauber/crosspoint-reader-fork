@@ -133,10 +133,13 @@ bool MarkdownSection::createSectionFile(const int fontId, const float lineCompre
               hyphenationEnabled);
   std::vector<uint32_t> lut;
 
-  MarkdownParser parser(markdown, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment,
-                        viewportWidth, viewportHeight, hyphenationEnabled,
-                        [this, &lut](std::unique_ptr<Page> page) { lut.emplace_back(onPageComplete(std::move(page))); });
-  bool success = parser.parseAndBuildPages();
+  // Heap allocate parser to save stack space
+  auto parser = std::make_unique<MarkdownParser>(
+      markdown, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+      viewportHeight, hyphenationEnabled,
+      [this, &lut](std::unique_ptr<Page> page) { lut.emplace_back(onPageComplete(std::move(page))); });
+
+  bool success = parser->parseAndBuildPages();
 
   if (!success) {
     LOG_ERR("MDS", "Failed to parse markdown");
