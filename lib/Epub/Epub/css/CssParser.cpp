@@ -344,6 +344,14 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
     const std::string_view displayValue = stripTrailingImportant(propValueBuf);
     style.display = (displayValue == "none") ? CssDisplay::None : CssDisplay::Block;
     style.defined.display = 1;
+  } else if (propNameBuf == "direction") {
+    if (propValueBuf == "rtl") {
+      style.direction = CssTextDirection::Rtl;
+      style.defined.direction = 1;
+    } else if (propValueBuf == "ltr") {
+      style.direction = CssTextDirection::Ltr;
+      style.defined.direction = 1;
+    }
   }
 }
 

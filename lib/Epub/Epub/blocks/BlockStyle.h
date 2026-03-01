@@ -22,6 +22,7 @@ struct BlockStyle {
   int16_t textIndent = 0;
   bool textIndentDefined = false;  // true if text-indent was explicitly set in CSS
   bool textAlignDefined = false;   // true if text-align was explicitly set in CSS
+  bool isRtl = false;              // true if CSS direction: rtl or HTML dir="rtl"
 
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
@@ -58,6 +59,8 @@ struct BlockStyle {
       combinedBlockStyle.alignment = alignment;
       combinedBlockStyle.textAlignDefined = textAlignDefined;
     }
+    // RTL: child overrides parent (CSS direction is inherited)
+    combinedBlockStyle.isRtl = child.isRtl || isRtl;
     return combinedBlockStyle;
   }
 
@@ -91,6 +94,10 @@ struct BlockStyle {
       blockStyle.alignment = blockStyle.textAlignDefined ? cssStyle.textAlign : CssTextAlign::Justify;
     } else {
       blockStyle.alignment = paragraphAlignment;
+    }
+    // RTL direction from CSS/HTML
+    if (cssStyle.hasDirection()) {
+      blockStyle.isRtl = (cssStyle.direction == CssTextDirection::Rtl);
     }
     return blockStyle;
   }
