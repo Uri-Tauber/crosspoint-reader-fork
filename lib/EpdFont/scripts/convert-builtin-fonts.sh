@@ -4,6 +4,13 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Hebrew consonants including final forms (U+05D0 alef through U+05EA tav)
+HEBREW_INTERVAL="--additional-intervals 0x05D0,0x05EA"
+
+# Hebrew fallback font for font families that lack Hebrew glyphs
+HEBREW_REGULAR="../builtinFonts/source/NotoSans/NotoSansHebrew-Regular.ttf"
+HEBREW_BOLD="../builtinFonts/source/NotoSans/NotoSansHebrew-Bold.ttf"
+
 READER_FONT_STYLES=("Regular" "Italic" "Bold" "BoldItalic")
 BOOKERLY_FONT_SIZES=(12 14 16 18)
 NOTOSANS_FONT_SIZES=(12 14 16 18)
@@ -23,8 +30,14 @@ for size in ${NOTOSANS_FONT_SIZES[@]}; do
   for style in ${READER_FONT_STYLES[@]}; do
     font_name="notosans_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     font_path="../builtinFonts/source/NotoSans/NotoSans-${style}.ttf"
+    # NotoSans lacks Hebrew — use NotoSansHebrew as fallback
+    if [[ "$style" == "Bold" || "$style" == "BoldItalic" ]]; then
+      hebrew_fallback="$HEBREW_BOLD"
+    else
+      hebrew_fallback="$HEBREW_REGULAR"
+    fi
     output_path="../builtinFonts/${font_name}.h"
-    python fontconvert.py $font_name $size $font_path --2bit --compress > $output_path
+    python fontconvert.py $font_name $size $font_path $hebrew_fallback --2bit --compress $HEBREW_INTERVAL > $output_path
     echo "Generated $output_path"
   done
 done
