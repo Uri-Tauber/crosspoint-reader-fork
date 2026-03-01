@@ -159,10 +159,11 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     return {};
   }
 
-  // Calculate first line indent (only for left/justified text without extra paragraph spacing)
+  // Calculate first line indent
+  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      blockStyle.textIndent > 0 && !extraParagraphSpacing &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
+      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign
           ? blockStyle.textIndent
           : 0;
 
@@ -272,14 +273,18 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 }
 
 void ParsedText::applyParagraphIndent() {
-  if (extraParagraphSpacing || words.empty() || blockStyle.isRtl) {
+  if (extraParagraphSpacing || words.empty()) {
     return;
   }
+
+  // For LTR, indent applies to Left/Justify; for RTL, indent applies to Right/Justify
+  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
 
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) - don't use fallback EmSpace
     // The actual indent positioning is handled in extractLine()
-  } else if (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left) {
+  } else if (isNaturalAlign) {
     // No CSS text-indent defined - use EmSpace fallback for visual indent
     words.front().insert(0, "\xe2\x80\x83");
   }
@@ -290,10 +295,11 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
                                                             const int pageWidth, const int spaceWidth,
                                                             std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec) {
-  // Calculate first line indent (only for left/justified text without extra paragraph spacing)
+  // Calculate first line indent
+  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      blockStyle.textIndent > 0 && !extraParagraphSpacing &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
+      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign
           ? blockStyle.textIndent
           : 0;
 
@@ -458,11 +464,12 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
 
-  // Calculate first line indent (only for left/justified text without extra paragraph spacing)
+  // Calculate first line indent
   const bool isFirstLine = breakIndex == 0;
+  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      isFirstLine && blockStyle.textIndent > 0 && !extraParagraphSpacing &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
+      isFirstLine && blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign
           ? blockStyle.textIndent
           : 0;
 
