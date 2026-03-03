@@ -98,9 +98,9 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     return;
   }
 
-  // Per-paragraph RTL auto-detection: if CSS/HTML didn't set direction,
-  // check the first 5 significant codepoints of the paragraph for RTL characters.
-  if (!blockStyle.isRtl) {
+  // Per-paragraph RTL auto-detection: only when CSS/HTML didn't explicitly set direction.
+  // Explicit dir="ltr" must be respected and not overridden by content heuristic.
+  if (!blockStyle.directionDefined) {
     // Build a small sample from the first words (enough for 5 codepoints)
     std::string sample;
     for (const auto& word : words) {
@@ -160,12 +160,11 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   }
 
   // Calculate first line indent
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign
-          ? blockStyle.textIndent
-          : 0;
+      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign ? blockStyle.textIndent : 0;
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
@@ -278,7 +277,8 @@ void ParsedText::applyParagraphIndent() {
   }
 
   // For LTR, indent applies to Left/Justify; for RTL, indent applies to Right/Justify
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
 
   if (blockStyle.textIndentDefined) {
@@ -296,12 +296,11 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
                                                             std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec) {
   // Calculate first line indent
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign
-          ? blockStyle.textIndent
-          : 0;
+      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign ? blockStyle.textIndent : 0;
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
@@ -466,12 +465,11 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
   // Calculate first line indent
   const bool isFirstLine = breakIndex == 0;
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      isFirstLine && blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign
-          ? blockStyle.textIndent
-          : 0;
+      isFirstLine && blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign ? blockStyle.textIndent : 0;
 
   // Calculate total word width for this line, count actual word gaps,
   // and accumulate total natural gap widths (including space kerning adjustments).
@@ -501,9 +499,12 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   const int effectivePageWidth = pageWidth - firstLineIndent;
   const bool isLastLine = breakIndex == lineBreakIndices.size() - 1;
 
-  // For RTL, default Left alignment becomes Right alignment
+  // For RTL, default Left alignment becomes Right alignment.
+  // Explicit CSS text-align: left is respected as physical left even in RTL context.
   const CssTextAlign effectiveAlignment =
-      (blockStyle.isRtl && blockStyle.alignment == CssTextAlign::Left) ? CssTextAlign::Right : blockStyle.alignment;
+      (blockStyle.isRtl && blockStyle.alignment == CssTextAlign::Left && !blockStyle.textAlignDefined)
+          ? CssTextAlign::Right
+          : blockStyle.alignment;
 
   // For justified text, compute per-gap extra to distribute remaining space evenly
   const int spareSpace = effectivePageWidth - lineWordWidthSum - totalNaturalGaps;
@@ -533,9 +534,9 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
       if (nextIsContinuation) {
         // Cross-boundary kerning for continuation words
-        xpos -= renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
-                                    firstCodepoint(words[lastBreakAt + wordIdx + 1]),
-                                    wordStyles[lastBreakAt + wordIdx]);
+        xpos -=
+            renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
+                                firstCodepoint(words[lastBreakAt + wordIdx + 1]), wordStyles[lastBreakAt + wordIdx]);
       } else {
         int gap = spaceWidth;
         if (wordIdx + 1 < lineWordCount) {
