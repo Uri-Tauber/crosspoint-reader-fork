@@ -155,6 +155,9 @@ void MarkdownReaderActivity::render(Activity::RenderLock&&) {
                                       viewportHeight, SETTINGS.hyphenationEnabled, popupFn)) {
         LOG_ERR("MDR", "Failed to persist page data to SD");
         section.reset();
+        renderer.clearScreen();
+        renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_LOAD_MD_FAILED), true, EpdFontFamily::BOLD);
+        renderer.displayBuffer();
         return;
       }
     } else {
@@ -221,9 +224,9 @@ void MarkdownReaderActivity::renderContents(std::unique_ptr<Page> page, const in
   }
 
   // Grayscale rendering (anti-aliased text)
-  renderer.storeBwBuffer();
-
   if (SETTINGS.textAntiAliasing) {
+    renderer.storeBwBuffer();
+
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
@@ -236,9 +239,9 @@ void MarkdownReaderActivity::renderContents(std::unique_ptr<Page> page, const in
 
     renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
-  }
 
-  renderer.restoreBwBuffer();
+    renderer.restoreBwBuffer();
+  }
 }
 
 void MarkdownReaderActivity::renderStatusBar() const {

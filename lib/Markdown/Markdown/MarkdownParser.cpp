@@ -3,15 +3,30 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 
+#include <algorithm>
+#include <cstring>
+
 #include "../md4c/md4c.h"
 #include "Epub/Page.h"
 
 namespace {
 bool isWhitespaceChar(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
 
-constexpr size_t MAX_CHUNK_SIZE = 32 * 1024;               // 32KB buffer for chunked parsing
-constexpr size_t CHUNK_BREAK_SCAN_WINDOW = 1024;           // Scan only the tail of each chunk for delimiters
-constexpr size_t TEXT_BLOCK_SPLIT_WORD_THRESHOLD = 750;    // Limit buffered words before layout
+// Returns true if byte is a UTF-8 continuation byte (10xxxxxx)
+bool isUtf8Continuation(const uint8_t b) { return (b & 0xC0) == 0x80; }
+
+constexpr size_t MAX_CHUNK_SIZE = 32 * 1024;             // 32KB buffer for chunked parsing
+constexpr size_t CHUNK_BREAK_SCAN_WINDOW = 1024;         // Scan only the tail of each chunk for delimiters
+constexpr size_t TEXT_BLOCK_SPLIT_WORD_THRESHOLD = 750;  // Limit buffered words before layout
+
+// Adjust a position backward so it doesn't land inside a multi-byte UTF-8 sequence.
+size_t alignUtf8(const uint8_t* buffer, size_t pos) {
+  // Walk back at most 3 continuation bytes (max UTF-8 char is 4 bytes)
+  for (int j = 0; j < 3 && pos > 0 && isUtf8Continuation(buffer[pos]); j++) {
+    pos--;
+  }
+  return pos;
+}
 
 size_t findSafeChunkBreak(const uint8_t* buffer, const size_t chunkSize) {
   const size_t scanLimit = (chunkSize > CHUNK_BREAK_SCAN_WINDOW) ? chunkSize - CHUNK_BREAK_SCAN_WINDOW : 0;
@@ -30,7 +45,8 @@ size_t findSafeChunkBreak(const uint8_t* buffer, const size_t chunkSize) {
     }
   }
 
-  return chunkSize;
+  // No newline found; ensure we don't split a multi-byte UTF-8 character
+  return alignUtf8(buffer, chunkSize);
 }
 }  // namespace
 
@@ -75,6 +91,11 @@ void MarkdownParser::startNewTextBlock(const CssTextAlign alignment) {
 
 void MarkdownParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
+
+  if (!currentPage) {
+    currentPage.reset(new Page());
+    currentPageNextY = 0;
+  }
 
   if (currentPageNextY + lineHeight > viewportHeight) {
     completePageFn(std::move(currentPage));
@@ -320,13 +341,46 @@ int MarkdownParser::textCallback(int textType, const char* text, unsigned size, 
 
   switch (static_cast<MD_TEXTTYPE>(textType)) {
     case MD_TEXT_BR:
+      self->flushPartWordBuffer();
+      if (self->currentTextBlock) {
+        self->makePages();
+        self->startNewTextBlock(static_cast<CssTextAlign>(self->paragraphAlignment));
+      }
+      return 0;
+
     case MD_TEXT_SOFTBR:
+      // Soft break = whitespace separator (flush current word so next word starts fresh)
       self->flushPartWordBuffer();
       return 0;
 
     case MD_TEXT_CODE:
-      if (self->currentTextBlock) {
-        self->currentTextBlock->addWord("...", EpdFontFamily::ITALIC);
+      // Render inline code as regular text (no special font on e-ink)
+      for (unsigned i = 0; i < size; i++) {
+        if (isWhitespaceChar(text[i])) {
+          if (self->partWordBufferIndex > 0) {
+            self->partWordBuffer[self->partWordBufferIndex] = '\0';
+            if (self->currentTextBlock) {
+              self->currentTextBlock->addWord(self->partWordBuffer, EpdFontFamily::REGULAR);
+            }
+            self->partWordBufferIndex = 0;
+          }
+          continue;
+        }
+        if (self->partWordBufferIndex >= MD_MAX_WORD_SIZE) {
+          size_t flushPos =
+              alignUtf8(reinterpret_cast<const uint8_t*>(self->partWordBuffer), self->partWordBufferIndex);
+          self->partWordBuffer[flushPos] = '\0';
+          if (self->currentTextBlock) {
+            self->currentTextBlock->addWord(self->partWordBuffer, EpdFontFamily::REGULAR);
+          }
+          // Carry over any orphaned continuation bytes
+          size_t carry = self->partWordBufferIndex - flushPos;
+          if (carry > 0) {
+            memmove(self->partWordBuffer, self->partWordBuffer + flushPos, carry);
+          }
+          self->partWordBufferIndex = carry;
+        }
+        self->partWordBuffer[self->partWordBufferIndex++] = text[i];
       }
       return 0;
 
@@ -339,12 +393,19 @@ int MarkdownParser::textCallback(int textType, const char* text, unsigned size, 
       } else if (self->partWordBufferIndex < MD_MAX_WORD_SIZE) {
         if (size == 6 && strncmp(text, "&quot;", 6) == 0) {
           self->partWordBuffer[self->partWordBufferIndex++] = '"';
+        } else if (size == 6 && strncmp(text, "&apos;", 6) == 0) {
+          self->partWordBuffer[self->partWordBufferIndex++] = '\'';
         } else if (size == 5 && strncmp(text, "&amp;", 5) == 0) {
           self->partWordBuffer[self->partWordBufferIndex++] = '&';
         } else if (size == 4 && strncmp(text, "&lt;", 4) == 0) {
           self->partWordBuffer[self->partWordBufferIndex++] = '<';
         } else if (size == 4 && strncmp(text, "&gt;", 4) == 0) {
           self->partWordBuffer[self->partWordBufferIndex++] = '>';
+        } else {
+          // Unknown entity — preserve verbatim so text isn't silently lost
+          for (unsigned j = 0; j < size && self->partWordBufferIndex < MD_MAX_WORD_SIZE; j++) {
+            self->partWordBuffer[self->partWordBufferIndex++] = text[j];
+          }
         }
       }
       return 0;
@@ -376,11 +437,18 @@ int MarkdownParser::textCallback(int textType, const char* text, unsigned size, 
     }
 
     if (self->partWordBufferIndex >= MD_MAX_WORD_SIZE) {
-      self->partWordBuffer[self->partWordBufferIndex] = '\0';
+      // Align backward to avoid splitting a multi-byte UTF-8 character
+      size_t flushPos = alignUtf8(reinterpret_cast<const uint8_t*>(self->partWordBuffer), self->partWordBufferIndex);
+      self->partWordBuffer[flushPos] = '\0';
       if (self->currentTextBlock) {
         self->currentTextBlock->addWord(self->partWordBuffer, fontStyle);
       }
-      self->partWordBufferIndex = 0;
+      // Carry over any orphaned continuation bytes
+      size_t carry = self->partWordBufferIndex - flushPos;
+      if (carry > 0) {
+        memmove(self->partWordBuffer, self->partWordBuffer + flushPos, carry);
+      }
+      self->partWordBufferIndex = carry;
     }
 
     self->partWordBuffer[self->partWordBufferIndex++] = text[i];
@@ -466,7 +534,7 @@ bool MarkdownParser::parseAndBuildPages() {
       LOG_ERR("MDP", "md_parse failed with code %d at offset %zu", result, offset);
       return false;
     }
-    
+
     // Process any remaining partial words at end of chunk
     // Note: md4c might leave us in a state (e.g. open block), which is lost between chunks.
     // This is a limitation of chunked parsing with a non-streaming parser.
