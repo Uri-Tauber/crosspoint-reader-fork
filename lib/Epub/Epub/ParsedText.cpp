@@ -159,12 +159,17 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     return {};
   }
 
-  // Calculate first line indent
+  // Calculate first line indent (only for naturally-aligned text).
+  // Positive text-indent is suppressed when extraParagraphSpacing is on.
+  // Negative text-indent (hanging indent) always applies — it is structural.
+  // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
   const bool isNaturalAlign =
       blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign ? blockStyle.textIndent : 0;
+      blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
+          ? blockStyle.textIndent
+          : 0;
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
@@ -295,12 +300,16 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
                                                             const int pageWidth, const int spaceWidth,
                                                             std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec) {
-  // Calculate first line indent
+  // Calculate first line indent (only for naturally-aligned text).
+  // Positive text-indent is suppressed when extraParagraphSpacing is on.
+  // Negative text-indent (hanging indent) always applies — it is structural.
   const bool isNaturalAlign =
       blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign ? blockStyle.textIndent : 0;
+      blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
+          ? blockStyle.textIndent
+          : 0;
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
@@ -463,13 +472,18 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
 
-  // Calculate first line indent
+  // Calculate first line indent (only for naturally-aligned text).
+  // Positive text-indent is suppressed when extraParagraphSpacing is on.
+  // Negative text-indent (hanging indent) always applies — it is structural.
   const bool isFirstLine = breakIndex == 0;
   const bool isNaturalAlign =
       blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
-      isFirstLine && blockStyle.textIndent > 0 && !extraParagraphSpacing && isNaturalAlign ? blockStyle.textIndent : 0;
+      isFirstLine && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
+              isNaturalAlign
+          ? blockStyle.textIndent
+          : 0;
 
   // Calculate total word width for this line, count actual word gaps,
   // and accumulate total natural gap widths (including space kerning adjustments).
@@ -513,7 +527,8 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
                                : 0;
 
   // Pre-calculate X positions for words
-  std::vector<uint16_t> lineXPos;
+  // Continuation words attach to the previous word with no space before them
+  std::vector<int16_t> lineXPos;
   lineXPos.reserve(lineWordCount);
 
   if (blockStyle.isRtl) {
@@ -529,7 +544,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
     for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
       xpos -= wordWidths[lastBreakAt + wordIdx];
-      lineXPos.push_back(static_cast<uint16_t>(xpos < 0 ? 0 : xpos));
+      lineXPos.push_back(static_cast<int16_t>(xpos));
 
       const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
       if (nextIsContinuation) {
@@ -552,7 +567,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
   } else {
     // LTR: position words from left to right
-    auto xpos = static_cast<uint16_t>(firstLineIndent);
+    auto xpos = static_cast<int16_t>(firstLineIndent);
     if (effectiveAlignment == CssTextAlign::Right) {
       xpos = effectivePageWidth - lineWordWidthSum - totalNaturalGaps;
     } else if (effectiveAlignment == CssTextAlign::Center) {
