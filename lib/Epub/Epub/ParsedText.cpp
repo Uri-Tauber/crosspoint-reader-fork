@@ -598,6 +598,10 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     if (containsSoftHyphen(word)) {
       stripSoftHyphensInPlace(word);
     }
+    // Reverse codepoints within RTL words so the renderer (which draws LTR) displays them correctly
+    if (blockStyle.isRtl) {
+      ScriptDetector::reverseIfRtl(word);
+    }
   }
 
   processLine(

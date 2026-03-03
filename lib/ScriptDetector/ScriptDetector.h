@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace ScriptDetector {
 
@@ -17,5 +18,9 @@ bool containsHebrew(const char* text);
 /// Returns true if any of them is an RTL codepoint.
 /// Skips combining marks (they don't count toward the limit).
 bool startsWithRtl(const char* text, int maxChars = 5);
+
+/// Reverse the UTF-8 codepoints of a word in-place if it contains any RTL characters.
+/// Leaves pure-LTR words (Latin, numbers, punctuation-only) untouched.
+void reverseIfRtl(std::string& word);
 
 }  // namespace ScriptDetector
