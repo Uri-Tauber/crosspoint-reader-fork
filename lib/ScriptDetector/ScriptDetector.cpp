@@ -1,6 +1,7 @@
 #include "ScriptDetector.h"
 
 #include <Utf8.h>
+
 #include <algorithm>
 
 namespace ScriptDetector {
