@@ -4,8 +4,8 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Hebrew consonants including final forms (U+05D0 alef through U+05EA tav)
-HEBREW_INTERVAL="--additional-intervals 0x05D0,0x05EA"
+# Hebrew consonants (U+05D0–U+05EA) plus common punctuation: maqaf (U+05BE), geresh (U+05F3), gershayim (U+05F4)
+HEBREW_INTERVAL="--additional-intervals 0x05BE,0x05BE --additional-intervals 0x05D0,0x05EA --additional-intervals 0x05F3,0x05F4"
 
 # Hebrew fallback font for font families that lack Hebrew glyphs
 HEBREW_REGULAR="../builtinFonts/source/NotoSans/NotoSansHebrew-Regular.ttf"
