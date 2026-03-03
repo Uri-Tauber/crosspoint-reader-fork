@@ -98,17 +98,17 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     return;
   }
 
-  // Per-paragraph RTL auto-detection: if CSS/HTML didn't set direction,
-  // check the first 5 significant codepoints of the paragraph for RTL characters.
-  if (!blockStyle.isRtl) {
-    // Build a small sample from the first words (enough for 5 codepoints)
-    std::string sample;
+  // Per-paragraph RTL auto-detection: only when CSS/HTML didn't explicitly set direction.
+  // Explicit dir="ltr" must be respected and not overridden by content heuristic.
+  if (!blockStyle.directionDefined) {
+    // Check the first few words for RTL letter codepoints (no heap allocation)
     for (const auto& word : words) {
-      sample += word;
-      if (sample.size() >= 20) break;  // 5 codepoints × max 4 bytes each
-    }
-    if (ScriptDetector::startsWithRtl(sample.c_str(), 5)) {
-      blockStyle.isRtl = true;
+      if (ScriptDetector::startsWithRtl(word.c_str(), 5)) {
+        blockStyle.isRtl = true;
+        break;
+      }
+      // Stop early once we've scanned enough content
+      if (&word - &words[0] >= 3) break;
     }
   }
 
