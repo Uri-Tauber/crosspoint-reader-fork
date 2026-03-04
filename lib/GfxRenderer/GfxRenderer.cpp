@@ -1039,8 +1039,8 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
       if (!combiningGlyph) continue;
       const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph->top, combiningGlyph->height, lastBaseTop);
       const int combiningX = x - raiseBy;
-      const int combiningY = combiningMark::centerOverRotated90CW(
-          lastBaseY, lastBaseLeft, lastBaseWidth, combiningGlyph->left, combiningGlyph->width);
+      const int combiningY = combiningMark::centerOverRotated90CW(lastBaseY, lastBaseLeft, lastBaseWidth,
+                                                                  combiningGlyph->left, combiningGlyph->width);
       renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, combiningX, combiningY, black, style);
       continue;
     }
