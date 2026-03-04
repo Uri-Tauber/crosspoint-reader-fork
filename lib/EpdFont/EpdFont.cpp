@@ -35,18 +35,16 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
       continue;
     }
 
-    const int raiseBy = isCombining
-        ? combiningMark::raiseAboveBase(glyph->top, glyph->height, lastBaseTop)
-        : 0;
+    const int raiseBy = isCombining ? combiningMark::raiseAboveBase(glyph->top, glyph->height, lastBaseTop) : 0;
 
     if (!isCombining && prevCp != 0) {
       cursorXFP += getKerning(prevCp, cp);  // 4.4 fixed-point kern
     }
 
     const int cursorXPixels = fp4::toPixel(cursorXFP);  // snap 12.4 fixed-point to nearest pixel
-    const int glyphBaseX = isCombining
-        ? combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, glyph->left, glyph->width)
-        : cursorXPixels;
+    const int glyphBaseX =
+        isCombining ? combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, glyph->left, glyph->width)
+                    : cursorXPixels;
     const int glyphBaseY = startY - raiseBy;
 
     *minX = std::min(*minX, glyphBaseX + glyph->left);

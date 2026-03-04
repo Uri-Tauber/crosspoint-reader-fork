@@ -40,11 +40,12 @@ constexpr int centerOver(int baseCursorPos, int baseLeft, int baseWidth, int mar
   return baseCursorPos + baseLeft + baseWidth / 2 - markWidth / 2 - markLeft;
 }
 
-/// For above-baseline combining marks, compute how many pixels to raise the
-/// mark so there is at least MIN_GAP_PX between the bottom of the mark and
-/// the top of the base glyph.  Returns 0 for below-baseline marks (top <= 0).
+/// For combining marks that sit entirely above the baseline, compute how many
+/// pixels to raise the mark so there is at least MIN_GAP_PX between its bottom
+/// edge and the top of the base glyph.  Returns 0 for marks that extend to or
+/// below the baseline (e.g. cedilla, dot-below, ogonek).
 constexpr int raiseAboveBase(int markTop, int markHeight, int baseTop) {
-  if (markTop <= 0) return 0;
+  if (markTop - markHeight <= 0) return 0;
   const int gap = markTop - markHeight - baseTop;
   return (gap < MIN_GAP_PX) ? (MIN_GAP_PX - gap) : 0;
 }
