@@ -9,38 +9,19 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "ReaderUtils.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-namespace {
-constexpr unsigned long goHomeMs = 1000;
-}
-
 void MarkdownReaderActivity::onEnter() {
-  ActivityWithSubactivity::onEnter();
+  Activity::onEnter();
 
   if (!markdown) {
     return;
   }
 
-  // Configure screen orientation based on settings
-  switch (SETTINGS.orientation) {
-    case CrossPointSettings::ORIENTATION::PORTRAIT:
-      renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-      break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CW:
-      renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
-      break;
-    case CrossPointSettings::ORIENTATION::INVERTED:
-      renderer.setOrientation(GfxRenderer::Orientation::PortraitInverted);
-      break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CCW:
-      renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
-      break;
-    default:
-      break;
-  }
+  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 
   markdown->setupCacheDir();
 
@@ -55,7 +36,7 @@ void MarkdownReaderActivity::onEnter() {
 }
 
 void MarkdownReaderActivity::onExit() {
-  ActivityWithSubactivity::onExit();
+  Activity::onExit();
 
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
@@ -66,43 +47,20 @@ void MarkdownReaderActivity::onExit() {
 }
 
 void MarkdownReaderActivity::loop() {
-  if (subActivity) {
-    subActivity->loop();
-    return;
-  }
-
-  if (pendingGoHome) {
-    pendingGoHome = false;
-    onGoHome();
-    return;
-  }
-
   // Long press BACK goes to file selection
-  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= goHomeMs) {
-    onGoBack();
+  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= ReaderUtils::GO_HOME_MS) {
+    activityManager.goToFileBrowser(markdown ? markdown->getPath() : "");
     return;
   }
 
   // Short press BACK goes to home
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back) && mappedInput.getHeldTime() < goHomeMs) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back) &&
+      mappedInput.getHeldTime() < ReaderUtils::GO_HOME_MS) {
     onGoHome();
     return;
   }
 
-  // When long-press chapter skip is disabled, turn pages on press instead of release.
-  const bool usePressForPageTurn = !SETTINGS.longPressChapterSkip;
-  const bool prevTriggered = usePressForPageTurn ? (mappedInput.wasPressed(MappedInputManager::Button::PageBack) ||
-                                                    mappedInput.wasPressed(MappedInputManager::Button::Left))
-                                                 : (mappedInput.wasReleased(MappedInputManager::Button::PageBack) ||
-                                                    mappedInput.wasReleased(MappedInputManager::Button::Left));
-  const bool powerPageTurn = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PAGE_TURN &&
-                             mappedInput.wasReleased(MappedInputManager::Button::Power);
-  const bool nextTriggered = usePressForPageTurn
-                                 ? (mappedInput.wasPressed(MappedInputManager::Button::PageForward) || powerPageTurn ||
-                                    mappedInput.wasPressed(MappedInputManager::Button::Right))
-                                 : (mappedInput.wasReleased(MappedInputManager::Button::PageForward) || powerPageTurn ||
-                                    mappedInput.wasReleased(MappedInputManager::Button::Right));
-
+  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     return;
   }
@@ -121,7 +79,7 @@ void MarkdownReaderActivity::loop() {
   }
 }
 
-void MarkdownReaderActivity::render(Activity::RenderLock&&) {
+void MarkdownReaderActivity::render(RenderLock&&) {
   if (!markdown) {
     return;
   }
@@ -215,41 +173,20 @@ void MarkdownReaderActivity::renderContents(std::unique_ptr<Page> page, const in
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
 
-  if (pagesUntilFullRefresh <= 1) {
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else {
-    renderer.displayBuffer();
-    pagesUntilFullRefresh--;
-  }
+  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  // Grayscale rendering (anti-aliased text)
   if (SETTINGS.textAntiAliasing) {
-    renderer.storeBwBuffer();
-
-    renderer.clearScreen(0x00);
-    renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-    page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-    renderer.copyGrayscaleLsbBuffers();
-
-    renderer.clearScreen(0x00);
-    renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-    page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-    renderer.copyGrayscaleMsbBuffers();
-
-    renderer.displayGrayBuffer();
-    renderer.setRenderMode(GfxRenderer::BW);
-
-    renderer.restoreBwBuffer();
+    ReaderUtils::renderAntiAliased(renderer, [&page, this, orientedMarginLeft, orientedMarginTop]() {
+      page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    });
   }
 }
 
 void MarkdownReaderActivity::renderStatusBar() const {
   if (!section) return;
 
-  const float progress = section->pageCount > 0
-                             ? static_cast<float>(section->currentPage + 1) * 100.0f / section->pageCount
-                             : 0;
+  const float progress =
+      section->pageCount > 0 ? static_cast<float>(section->currentPage + 1) * 100.0f / section->pageCount : 0;
   std::string title = markdown ? markdown->getTitle() : "";
 
   GUI.drawStatusBar(renderer, progress, section->currentPage + 1, section->pageCount, title);

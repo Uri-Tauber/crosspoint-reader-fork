@@ -175,8 +175,7 @@ int MarkdownParser::enterBlockCallback(int blockType, void* detail, void* userda
       if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
         self->makePages();
       }
-      self->currentTextBlock.reset(
-          new ParsedText(self->extraParagraphSpacing, self->hyphenationEnabled, quoteStyle));
+      self->currentTextBlock.reset(new ParsedText(self->extraParagraphSpacing, self->hyphenationEnabled, quoteStyle));
       self->italicDepth++;
       break;
     }
@@ -194,8 +193,7 @@ int MarkdownParser::enterBlockCallback(int blockType, void* detail, void* userda
       if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
         self->makePages();
       }
-      self->currentTextBlock.reset(
-          new ParsedText(self->extraParagraphSpacing, self->hyphenationEnabled, listStyle));
+      self->currentTextBlock.reset(new ParsedText(self->extraParagraphSpacing, self->hyphenationEnabled, listStyle));
       self->inListItem = true;
       self->firstListItemWord = true;
       break;
@@ -213,9 +211,10 @@ int MarkdownParser::enterBlockCallback(int blockType, void* detail, void* userda
       self->flushPartWordBuffer();
       self->startNewTextBlock(CssTextAlign::Center);
       if (self->currentTextBlock) {
-        self->currentTextBlock->addWord("\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
-                                        "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80",
-                                        EpdFontFamily::REGULAR);
+        self->currentTextBlock->addWord(
+            "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+            "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80",
+            EpdFontFamily::REGULAR);
       }
       break;
 

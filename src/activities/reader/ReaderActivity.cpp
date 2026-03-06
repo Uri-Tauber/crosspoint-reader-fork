@@ -120,12 +120,8 @@ void ReaderActivity::onGoToTxtReader(std::unique_ptr<Txt> txt) {
 }
 
 void ReaderActivity::onGoToMarkdownReader(std::unique_ptr<Markdown> markdown) {
-  const auto markdownPath = markdown->getPath();
-  currentBookPath = markdownPath;
-  exitActivity();
-  enterNewActivity(new MarkdownReaderActivity(
-      renderer, mappedInput, std::move(markdown), [this, markdownPath] { goToLibrary(markdownPath); },
-      [this] { onGoBack(); }));
+  currentBookPath = markdown->getPath();
+  activityManager.replaceActivity(std::make_unique<MarkdownReaderActivity>(renderer, mappedInput, std::move(markdown)));
 }
 
 void ReaderActivity::onEnter() {

@@ -116,10 +116,10 @@ bool MarkdownSection::clearCache() const {
   return true;
 }
 
-bool MarkdownSection::createSectionFile(const int fontId, const float lineCompression,
-                                        const bool extraParagraphSpacing, const uint8_t paragraphAlignment,
-                                        const uint16_t viewportWidth, const uint16_t viewportHeight,
-                                        const bool hyphenationEnabled, const std::function<void()>& popupFn) {
+bool MarkdownSection::createSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
+                                        const uint8_t paragraphAlignment, const uint16_t viewportWidth,
+                                        const uint16_t viewportHeight, const bool hyphenationEnabled,
+                                        const std::function<void()>& popupFn) {
   markdown->setupCacheDir();
 
   if (popupFn) {
