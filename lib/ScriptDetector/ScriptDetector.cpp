@@ -64,6 +64,23 @@ void reverseIfRtl(std::string& word) {
   // Reverse the codepoints array
   std::reverse(codepoints, codepoints + count);
 
+  // Mirror brackets after reversal (only check ASCII range 0x28-0x7D)
+  for (size_t i = 0; i < count; i++) {
+    const uint32_t cp = codepoints[i];
+    if (cp >= 0x28 && cp <= 0x7D) {  // Fast range check covers all ASCII brackets
+      switch (cp) {
+        case '(': codepoints[i] = ')'; break;
+        case ')': codepoints[i] = '('; break;
+        case '[': codepoints[i] = ']'; break;
+        case ']': codepoints[i] = '['; break;
+        case '{': codepoints[i] = '}'; break;
+        case '}': codepoints[i] = '{'; break;
+        case '<': codepoints[i] = '>'; break;
+        case '>': codepoints[i] = '<'; break;
+      }
+    }
+  }
+
   // Re-encode to UTF-8
   std::string reversed;
   reversed.reserve(word.size());
