@@ -52,6 +52,18 @@ void stripSoftHyphensInPlace(std::string& word) {
   }
 }
 
+// Check if word's first letter is LTR (Latin). Returns false for RTL or neutral-only.
+bool isLtrWord(const std::string& word) {
+  auto* p = reinterpret_cast<const unsigned char*>(word.c_str());
+  while (*p) {
+    uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0 || cp == REPLACEMENT_GLYPH) break;
+    if (!ScriptDetector::isLetterCodepoint(cp)) continue;
+    return !ScriptDetector::isRtlCodepoint(cp);
+  }
+  return false;
+}
+
 // Returns the advance width for a word while ignoring soft hyphen glyphs and optionally appending a visible hyphen.
 // Uses advance width (sum of glyph advances + kerning) rather than bounding box width so that italic glyph overhangs
 // don't inflate inter-word spacing.
@@ -598,10 +610,74 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     if (containsSoftHyphen(word)) {
       stripSoftHyphensInPlace(word);
     }
-    // Reverse codepoints within RTL words so the renderer (which draws LTR) displays them correctly
-    if (blockStyle.isRtl) {
-      ScriptDetector::reverseIfRtl(word);
+  }
+
+  // BiDi processing: reorder opposite-direction runs
+  // RTL paragraphs have LTR runs that need left-to-right order
+  // LTR paragraphs have RTL runs that need right-to-left order
+  const size_t n = lineWords.size();
+  size_t runStart = 0;
+  while (runStart < n) {
+    const bool wordIsLtr = isLtrWord(lineWords[runStart]);
+    const bool isOppositeDir = (blockStyle.isRtl && wordIsLtr) || (!blockStyle.isRtl && !wordIsLtr);
+    
+    if (isOppositeDir) {
+      size_t runEnd = runStart + 1;
+      while (runEnd < n && isLtrWord(lineWords[runEnd]) == wordIsLtr) {
+        runEnd++;
+      }
+      
+      if (runEnd - runStart > 1) {
+        // Calculate average gap from original positions
+        int totalGap = 0;
+        for (size_t i = runStart; i < runEnd - 1; i++) {
+          int gap;
+          if (blockStyle.isRtl) {
+            // RTL paragraph: positions decrease, next word is at lower X
+            gap = lineXPos[i] - lineXPos[i + 1] - wordWidths[lastBreakAt + i + 1];
+          } else {
+            // LTR paragraph: positions increase, next word is at higher X
+            gap = lineXPos[i + 1] - lineXPos[i] - wordWidths[lastBreakAt + i];
+          }
+          totalGap += gap;
+        }
+        int avgGap = totalGap / static_cast<int>(runEnd - runStart - 1);
+
+        if (blockStyle.isRtl) {
+          // LTR run in RTL paragraph: recalculate left-to-right from leftmost position
+          int xpos = lineXPos[runEnd - 1];  // Leftmost position
+          for (size_t i = runStart; i < runEnd; i++) {
+            lineXPos[i] = static_cast<int16_t>(xpos);
+            xpos += wordWidths[lastBreakAt + i] + avgGap;
+          }
+        } else {
+          // RTL run in LTR paragraph: recalculate right-to-left from rightmost position
+          // rightmost = pos[runEnd-1] + width[runEnd-1]
+          int xpos = lineXPos[runEnd - 1] + wordWidths[lastBreakAt + runEnd - 1];
+          for (size_t i = runStart; i < runEnd; i++) {
+            xpos -= wordWidths[lastBreakAt + i];
+            lineXPos[i] = static_cast<int16_t>(xpos);
+            xpos -= avgGap;
+          }
+        }
+      }
+      runStart = runEnd;
+    } else {
+      runStart++;
     }
+  }
+
+  // Reverse Hebrew words internally
+  for (auto& word : lineWords) {
+    // Fast path: skip pure ASCII words in LTR paragraphs
+    if (!blockStyle.isRtl) {
+      bool hasNonAscii = false;
+      for (unsigned char c : word) {
+        if (c >= 0x80) { hasNonAscii = true; break; }
+      }
+      if (!hasNonAscii) continue;
+    }
+    ScriptDetector::reverseIfRtl(word);
   }
 
   processLine(
