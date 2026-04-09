@@ -113,10 +113,31 @@ void HomeActivity::onEnter() {
   // Check if OPDS browser URL is configured
   hasOpdsUrl = strlen(SETTINGS.opdsServerUrl) > 0;
 
-  selectorIndex = 0;
-
   const auto& metrics = UITheme::getInstance().getMetrics();
   loadRecentBooks(metrics.homeRecentBooksCount);
+
+  const auto base = static_cast<int>(recentBooks.size());
+  switch (initialMenuItem) {
+    case HomeMenuItem::FILE_BROWSER:
+      selectorIndex = base;
+      break;
+    case HomeMenuItem::RECENTS:
+      selectorIndex = base + 1;
+      break;
+    case HomeMenuItem::OPDS_BROWSER:
+      selectorIndex = hasOpdsUrl ? base + 2 : 0;
+      break;
+    case HomeMenuItem::FILE_TRANSFER:
+      selectorIndex = base + (hasOpdsUrl ? 3 : 2);
+      break;
+    case HomeMenuItem::SETTINGS_MENU:
+      selectorIndex = base + (hasOpdsUrl ? 4 : 3);
+      break;
+    case HomeMenuItem::NONE:
+    default:
+      selectorIndex = 0;
+      break;
+  }
 
   // Trigger first update
   requestUpdate();
