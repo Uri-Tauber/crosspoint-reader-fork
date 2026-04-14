@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <HardwareSerial.h>
+#include <ScriptDetector.h>
 #include <Serialization.h>
 
 #include "I18nStrings.h"
@@ -42,6 +43,14 @@ const char* I18n::getLanguageName(Language lang) const {
     return "???";
   }
   return LANGUAGE_NAMES[index];
+}
+
+bool I18n::isLanguageRtl(Language lang) const {
+  const auto index = static_cast<size_t>(lang);
+  if (index >= static_cast<size_t>(Language::_COUNT)) {
+    return false;
+  }
+  return ScriptDetector::startsWithRtl(getLanguageName(lang), 3);
 }
 
 void I18n::saveSettings() {

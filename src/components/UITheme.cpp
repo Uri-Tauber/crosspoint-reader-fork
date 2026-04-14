@@ -2,6 +2,7 @@
 
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <I18n.h>
 #include <Logging.h>
 
 #include <memory>
@@ -22,6 +23,8 @@ UITheme::UITheme() {
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
 }
+
+bool UITheme::isRtl() const { return I18N.isCurrentLanguageRtl(); }
 
 void UITheme::reload() {
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);

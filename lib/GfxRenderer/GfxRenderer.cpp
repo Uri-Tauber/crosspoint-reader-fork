@@ -3,6 +3,7 @@
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
+#include <ScriptDetector.h>
 #include <Utf8.h>
 
 #include "FontCacheManager.h"
@@ -241,12 +242,12 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    // Skip Hebrew Niqqud (vowel marks) 
+    // Skip Hebrew Niqqud (vowel marks)
     // Temporary: avoid adding Niqqud to built-in fonts. Remove when custom fonts are supported.
     if (cp >= 0x0591 && cp <= 0x05C7) {
       continue;
     }
-    
+
     if (utf8IsCombiningMark(cp)) {
       const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
       int raiseBy = 0;
@@ -279,6 +280,63 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     }
     prevCp = cp;
   }
+}
+
+namespace {
+bool hasRtlCodepoint(const char* text) {
+  if (!text) return false;
+  auto* p = reinterpret_cast<const unsigned char*>(text);
+  while (*p) {
+    uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0 || cp == REPLACEMENT_GLYPH) break;
+    if (ScriptDetector::isRtlCodepoint(cp)) return true;
+  }
+  return false;
+}
+
+std::string buildVisualRtlText(const char* text) {
+  if (!text || *text == '\0') return {};
+
+  std::vector<std::string> segments;
+  segments.reserve(12);
+
+  const char* p = text;
+  while (*p) {
+    const char* runStart = p;
+    const bool isSpaceRun = (*p == ' ');
+    while (*p && (*p == ' ') == isSpaceRun) {
+      p++;
+    }
+
+    std::string segment(runStart, static_cast<size_t>(p - runStart));
+    if (!isSpaceRun) {
+      ScriptDetector::reverseIfRtl(segment);
+    }
+    segments.push_back(std::move(segment));
+  }
+
+  std::string visual;
+  visual.reserve(strlen(text));
+  for (auto it = segments.rbegin(); it != segments.rend(); ++it) {
+    visual += *it;
+  }
+  return visual;
+}
+}  // namespace
+
+void GfxRenderer::drawTextRtl(const int fontId, const int rightX, const int y, const char* text, const bool black,
+                              const EpdFontFamily::Style style) const {
+  if (!text || *text == '\0') return;
+
+  if (!hasRtlCodepoint(text)) {
+    const int width = getTextWidth(fontId, text, style);
+    drawText(fontId, rightX - width, y, text, black, style);
+    return;
+  }
+
+  std::string visual = buildVisualRtlText(text);
+  const int width = getTextWidth(fontId, visual.c_str(), style);
+  drawText(fontId, rightX - width, y, visual.c_str(), black, style);
 }
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {
@@ -1083,12 +1141,12 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    // Skip Hebrew Niqqud (vowel marks) 
+    // Skip Hebrew Niqqud (vowel marks)
     // Temporary: avoid adding Niqqud to built-in fonts. Remove when custom fonts are supported.
     if (cp >= 0x0591 && cp <= 0x05C7) {
       continue;
     }
-    
+
     if (utf8IsCombiningMark(cp)) {
       const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
       int raiseBy = 0;
