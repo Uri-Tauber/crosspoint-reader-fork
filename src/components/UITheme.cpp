@@ -2,6 +2,7 @@
 
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <I18n.h>
 #include <Logging.h>
 
 #include <memory>
@@ -22,6 +23,8 @@ UITheme::UITheme() {
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
 }
+
+bool UITheme::isRtl() const { return I18N.isCurrentLanguageRtl(); }
 
 void UITheme::reload() {
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
@@ -108,4 +111,26 @@ int UITheme::getProgressBarHeight() {
   const bool showProgressBar =
       SETTINGS.statusBarProgressBar != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS;
   return (showProgressBar ? (((SETTINGS.statusBarProgressBarThickness + 1) * 2) + metrics.progressBarMarginTop) : 0);
+}
+
+bool UITheme::isRtlUi() { return UITheme::getInstance().isRtl(); }
+
+void UITheme::drawTextStart(const GfxRenderer& renderer, const int fontId, const int leftX, const int rightX,
+                            const int y, const char* text, const bool black, const EpdFontFamily::Style style) {
+  if (isRtlUi()) {
+    renderer.drawTextRtl(fontId, rightX, y, text, black, style);
+  } else {
+    renderer.drawText(fontId, leftX, y, text, black, style);
+  }
+}
+
+void UITheme::drawTextEnd(const GfxRenderer& renderer, const int fontId, const int leftX, const int rightX, const int y,
+                          const char* text, const bool black, const EpdFontFamily::Style style) {
+  if (!text) return;
+  const int width = renderer.getTextWidth(fontId, text, style);
+  if (isRtlUi()) {
+    renderer.drawTextRtl(fontId, leftX + width, y, text, black, style);
+  } else {
+    renderer.drawText(fontId, rightX - width, y, text, black, style);
+  }
 }

@@ -69,14 +69,30 @@ void reverseIfRtl(std::string& word) {
     const uint32_t cp = codepoints[i];
     if (cp >= 0x28 && cp <= 0x7D) {  // Fast range check covers all ASCII brackets
       switch (cp) {
-        case '(': codepoints[i] = ')'; break;
-        case ')': codepoints[i] = '('; break;
-        case '[': codepoints[i] = ']'; break;
-        case ']': codepoints[i] = '['; break;
-        case '{': codepoints[i] = '}'; break;
-        case '}': codepoints[i] = '{'; break;
-        case '<': codepoints[i] = '>'; break;
-        case '>': codepoints[i] = '<'; break;
+        case '(':
+          codepoints[i] = ')';
+          break;
+        case ')':
+          codepoints[i] = '(';
+          break;
+        case '[':
+          codepoints[i] = ']';
+          break;
+        case ']':
+          codepoints[i] = '[';
+          break;
+        case '{':
+          codepoints[i] = '}';
+          break;
+        case '}':
+          codepoints[i] = '{';
+          break;
+        case '<':
+          codepoints[i] = '>';
+          break;
+        case '>':
+          codepoints[i] = '<';
+          break;
       }
     }
   }

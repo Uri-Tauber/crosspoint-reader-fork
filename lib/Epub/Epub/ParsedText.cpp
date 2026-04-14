@@ -174,7 +174,8 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
   // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
       blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
@@ -291,7 +292,8 @@ void ParsedText::applyParagraphIndent() {
   }
 
   // For LTR, indent applies to Left/Justify; for RTL, indent applies to Right/Justify
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
 
   if (blockStyle.textIndentDefined) {
@@ -312,7 +314,8 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
   // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
   const int firstLineIndent =
       blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
@@ -484,13 +487,13 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   // it is structural (positions the bullet/marker), not decorative.
   // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
   const bool isFirstLine = breakIndex == 0;
-  const bool isNaturalAlign = blockStyle.alignment == CssTextAlign::Justify ||
+  const bool isNaturalAlign =
+      blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
-  const int firstLineIndent =
-      isFirstLine && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              isNaturalAlign
-          ? blockStyle.textIndent
-          : 0;
+  const int firstLineIndent = isFirstLine && blockStyle.textIndentDefined &&
+                                      (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
+                                  ? blockStyle.textIndent
+                                  : 0;
 
   // Calculate total word width for this line, count actual word gaps,
   // and accumulate total natural gap widths (including space kerning adjustments).
@@ -551,9 +554,9 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
       if (nextIsContinuation) {
         // Cross-boundary kerning for continuation words
-        xpos -= renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
-                                    firstCodepoint(words[lastBreakAt + wordIdx + 1]),
-                                    wordStyles[lastBreakAt + wordIdx]);
+        xpos -=
+            renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
+                                firstCodepoint(words[lastBreakAt + wordIdx + 1]), wordStyles[lastBreakAt + wordIdx]);
       } else {
         int gap = 0;
         if (wordIdx + 1 < lineWordCount) {
@@ -590,8 +593,8 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
         int gap = 0;
         if (wordIdx + 1 < lineWordCount) {
           gap = renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
-                                             firstCodepoint(words[lastBreakAt + wordIdx + 1]),
-                                             wordStyles[lastBreakAt + wordIdx]);
+                                         firstCodepoint(words[lastBreakAt + wordIdx + 1]),
+                                         wordStyles[lastBreakAt + wordIdx]);
         }
         if (effectiveAlignment == CssTextAlign::Justify && !isLastLine) {
           gap += justifyExtra;
@@ -620,13 +623,13 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   while (runStart < n) {
     const bool wordIsLtr = isLtrWord(lineWords[runStart]);
     const bool isOppositeDir = (blockStyle.isRtl && wordIsLtr) || (!blockStyle.isRtl && !wordIsLtr);
-    
+
     if (isOppositeDir) {
       size_t runEnd = runStart + 1;
       while (runEnd < n && isLtrWord(lineWords[runEnd]) == wordIsLtr) {
         runEnd++;
       }
-      
+
       if (runEnd - runStart > 1) {
         // Calculate average gap from original positions
         int totalGap = 0;
@@ -673,7 +676,10 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     if (!blockStyle.isRtl) {
       bool hasNonAscii = false;
       for (unsigned char c : word) {
-        if (c >= 0x80) { hasNonAscii = true; break; }
+        if (c >= 0x80) {
+          hasNonAscii = true;
+          break;
+        }
       }
       if (!hasNonAscii) continue;
     }

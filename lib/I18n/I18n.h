@@ -23,6 +23,8 @@ class I18n {
   Language getLanguage() const { return _language; }
   void setLanguage(Language lang);
   const char* getLanguageName(Language lang) const;
+  bool isLanguageRtl(Language lang) const;
+  bool isCurrentLanguageRtl() const { return isLanguageRtl(_language); }
 
   void saveSettings();
   void loadSettings();
