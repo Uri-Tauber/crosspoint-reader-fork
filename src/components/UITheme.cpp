@@ -118,7 +118,8 @@ bool UITheme::isRtlUi() { return UITheme::getInstance().isRtl(); }
 void UITheme::drawTextStart(const GfxRenderer& renderer, const int fontId, const int leftX, const int rightX,
                             const int y, const char* text, const bool black, const EpdFontFamily::Style style) {
   if (isRtlUi()) {
-    renderer.drawTextRtl(fontId, rightX, y, text, black, style);
+    const int width = renderer.getTextWidth(fontId, text, style);
+    renderer.drawText(fontId, rightX - width, y, text, black, style);
   } else {
     renderer.drawText(fontId, leftX, y, text, black, style);
   }
@@ -127,10 +128,10 @@ void UITheme::drawTextStart(const GfxRenderer& renderer, const int fontId, const
 void UITheme::drawTextEnd(const GfxRenderer& renderer, const int fontId, const int leftX, const int rightX, const int y,
                           const char* text, const bool black, const EpdFontFamily::Style style) {
   if (!text) return;
-  const int width = renderer.getTextWidth(fontId, text, style);
   if (isRtlUi()) {
-    renderer.drawTextRtl(fontId, leftX + width, y, text, black, style);
+    renderer.drawText(fontId, leftX, y, text, black, style);
   } else {
+    const int width = renderer.getTextWidth(fontId, text, style);
     renderer.drawText(fontId, rightX - width, y, text, black, style);
   }
 }

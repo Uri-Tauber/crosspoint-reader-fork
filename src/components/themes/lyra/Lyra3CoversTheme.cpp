@@ -21,7 +21,6 @@ constexpr int cornerRadius = 6;
 void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                            bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
-  const bool rtl = UITheme::getInstance().isRtl();
   const int tileWidth = (rect.width - 2 * Lyra3CoversMetrics::values.contentSidePadding) / 3;
   const int tileY = rect.y;
   const bool hasContinueReading = !recentBooks.empty();
@@ -111,11 +110,8 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
       int currentY = tileY + Lyra3CoversMetrics::values.homeCoverHeight + hPaddingInSelection + 5;
       for (const auto& line : titleLines) {
-        if (rtl) {
-          renderer.drawTextRtl(SMALL_FONT_ID, tileX + tileWidth - hPaddingInSelection, currentY, line.c_str(), true);
-        } else {
-          renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, currentY, line.c_str(), true);
-        }
+        UITheme::drawTextStart(renderer, SMALL_FONT_ID, tileX + hPaddingInSelection,
+                               tileX + tileWidth - hPaddingInSelection, currentY, line.c_str(), true);
         currentY += titleLineHeight;
       }
     }

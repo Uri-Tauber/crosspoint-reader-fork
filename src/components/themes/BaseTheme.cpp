@@ -411,8 +411,8 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
       }
     }
 
-    renderer.drawTextRtl(UI_12_FONT_ID, currentRight, rect.y, tab.label, !(tab.selected && selected),
-                         tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    renderer.drawText(UI_12_FONT_ID, leftX, rect.y, tab.label, !(tab.selected && selected),
+                      tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
     currentRight = leftX - BaseMetrics::values.tabSpacing;
   }
 }

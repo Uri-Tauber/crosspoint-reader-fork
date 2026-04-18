@@ -246,8 +246,8 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
       }
     }
 
-    renderer.drawTextRtl(UI_10_FONT_ID, tabX + tabWidth - hPaddingInSelection, rect.y + 6, tab.label,
-                         !(tab.selected && selected), EpdFontFamily::REGULAR);
+    renderer.drawText(UI_10_FONT_ID, tabX + hPaddingInSelection, rect.y + 6, tab.label, !(tab.selected && selected),
+                      EpdFontFamily::REGULAR);
 
     currentRight = tabX - LyraMetrics::values.tabSpacing;
   }

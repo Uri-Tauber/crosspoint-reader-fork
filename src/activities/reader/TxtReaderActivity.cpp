@@ -369,11 +369,7 @@ void TxtReaderActivity::renderPage() {
             break;
         }
 
-        if (lineIsRtl) {
-          renderer.drawTextRtl(cachedFontId, x + textWidth, y, line.c_str());
-        } else {
-          renderer.drawText(cachedFontId, x, y, line.c_str());
-        }
+        renderer.drawText(cachedFontId, x, y, line.c_str());
       }
       y += lineHeight;
     }
