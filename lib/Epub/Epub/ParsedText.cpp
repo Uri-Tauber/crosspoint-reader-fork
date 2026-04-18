@@ -19,6 +19,10 @@ namespace {
 // Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
 constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
+constexpr int RTL_DETECTION_SCAN_LETTERS = 5;
+constexpr size_t RTL_DETECTION_SCAN_WORDS = 3;
+
+enum class WordDirection { Neutral, Ltr, Rtl };
 
 // Returns the first rendered codepoint of a word (skipping leading soft hyphens).
 uint32_t firstCodepoint(const std::string& word) {
@@ -52,16 +56,20 @@ void stripSoftHyphensInPlace(std::string& word) {
   }
 }
 
-// Check if word's first letter is LTR (Latin). Returns false for RTL or neutral-only.
-bool isLtrWord(const std::string& word) {
+WordDirection classifyWordDirection(const std::string& word) {
   auto* p = reinterpret_cast<const unsigned char*>(word.c_str());
   while (*p) {
     uint32_t cp = utf8NextCodepoint(&p);
     if (cp == 0 || cp == REPLACEMENT_GLYPH) break;
     if (!ScriptDetector::isLetterCodepoint(cp)) continue;
-    return !ScriptDetector::isRtlCodepoint(cp);
+    return ScriptDetector::isRtlCodepoint(cp) ? WordDirection::Rtl : WordDirection::Ltr;
   }
-  return false;
+  return WordDirection::Neutral;
+}
+
+bool isNaturalAlignment(const BlockStyle& blockStyle) {
+  return blockStyle.alignment == CssTextAlign::Justify ||
+         (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
 }
 
 // Returns the advance width for a word while ignoring soft hyphen glyphs and optionally appending a visible hyphen.
@@ -113,14 +121,13 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   // Per-paragraph RTL auto-detection: only when CSS/HTML didn't explicitly set direction.
   // Explicit dir="ltr" must be respected and not overridden by content heuristic.
   if (!blockStyle.directionDefined) {
-    // Check the first few words for RTL letter codepoints (no heap allocation)
-    for (const auto& word : words) {
-      if (ScriptDetector::startsWithRtl(word.c_str(), 5)) {
+    // Check the first few words for RTL letter codepoints (no heap allocation).
+    const size_t wordsToScan = std::min(words.size(), RTL_DETECTION_SCAN_WORDS);
+    for (size_t i = 0; i < wordsToScan; ++i) {
+      if (ScriptDetector::startsWithRtl(words[i].c_str(), RTL_DETECTION_SCAN_LETTERS)) {
         blockStyle.isRtl = true;
         break;
       }
-      // Stop early once we've scanned enough content
-      if (&word - &words[0] >= 3) break;
     }
   }
 
@@ -174,9 +181,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
   // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
-  const bool isNaturalAlign =
-      blockStyle.alignment == CssTextAlign::Justify ||
-      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
+  const bool isNaturalAlign = isNaturalAlignment(blockStyle);
   const int firstLineIndent =
       blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
           ? blockStyle.textIndent
@@ -292,9 +297,7 @@ void ParsedText::applyParagraphIndent() {
   }
 
   // For LTR, indent applies to Left/Justify; for RTL, indent applies to Right/Justify
-  const bool isNaturalAlign =
-      blockStyle.alignment == CssTextAlign::Justify ||
-      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
+  const bool isNaturalAlign = isNaturalAlignment(blockStyle);
 
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) - don't use fallback EmSpace
@@ -314,9 +317,7 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
   // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
-  const bool isNaturalAlign =
-      blockStyle.alignment == CssTextAlign::Justify ||
-      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
+  const bool isNaturalAlign = isNaturalAlignment(blockStyle);
   const int firstLineIndent =
       blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
           ? blockStyle.textIndent
@@ -487,9 +488,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   // it is structural (positions the bullet/marker), not decorative.
   // For RTL, natural alignment is Right/Justify; for LTR, it is Left/Justify.
   const bool isFirstLine = breakIndex == 0;
-  const bool isNaturalAlign =
-      blockStyle.alignment == CssTextAlign::Justify ||
-      (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
+  const bool isNaturalAlign = isNaturalAlignment(blockStyle);
   const int firstLineIndent = isFirstLine && blockStyle.textIndentDefined &&
                                       (blockStyle.textIndent < 0 || !extraParagraphSpacing) && isNaturalAlign
                                   ? blockStyle.textIndent
@@ -521,9 +520,12 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   const int effectivePageWidth = pageWidth - firstLineIndent;
   const bool isLastLine = breakIndex == lineBreakIndices.size() - 1;
 
-  // For RTL, default Left alignment becomes Right alignment
+  // For RTL, implicit/default Left alignment becomes Right alignment.
+  // Explicit text-align:left must remain left for CSS correctness.
   const CssTextAlign effectiveAlignment =
-      (blockStyle.isRtl && blockStyle.alignment == CssTextAlign::Left) ? CssTextAlign::Right : blockStyle.alignment;
+      (blockStyle.isRtl && !blockStyle.textAlignDefined && blockStyle.alignment == CssTextAlign::Left)
+          ? CssTextAlign::Right
+          : blockStyle.alignment;
 
   // For justified text, compute per-gap extra to distribute remaining space evenly
   const int spareSpace = effectivePageWidth - lineWordWidthSum - totalNaturalGaps;
@@ -621,12 +623,13 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   const size_t n = lineWords.size();
   size_t runStart = 0;
   while (runStart < n) {
-    const bool wordIsLtr = isLtrWord(lineWords[runStart]);
-    const bool isOppositeDir = (blockStyle.isRtl && wordIsLtr) || (!blockStyle.isRtl && !wordIsLtr);
+    const WordDirection runDirection = classifyWordDirection(lineWords[runStart]);
+    const bool isOppositeDir = (blockStyle.isRtl && runDirection == WordDirection::Ltr) ||
+                               (!blockStyle.isRtl && runDirection == WordDirection::Rtl);
 
     if (isOppositeDir) {
       size_t runEnd = runStart + 1;
-      while (runEnd < n && isLtrWord(lineWords[runEnd]) == wordIsLtr) {
+      while (runEnd < n && classifyWordDirection(lineWords[runEnd]) == runDirection) {
         runEnd++;
       }
 
@@ -668,22 +671,6 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     } else {
       runStart++;
     }
-  }
-
-  // Reverse Hebrew words internally
-  for (auto& word : lineWords) {
-    // Fast path: skip pure ASCII words in LTR paragraphs
-    if (!blockStyle.isRtl) {
-      bool hasNonAscii = false;
-      for (unsigned char c : word) {
-        if (c >= 0x80) {
-          hasNonAscii = true;
-          break;
-        }
-      }
-      if (!hasNonAscii) continue;
-    }
-    ScriptDetector::reverseIfRtl(word);
   }
 
   processLine(

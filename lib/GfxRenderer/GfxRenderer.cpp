@@ -8,6 +8,12 @@
 
 #include "FontCacheManager.h"
 
+namespace {
+bool hasRtlCodepoint(const char* text);
+std::string buildVisualRtlText(const char* text);
+const char* resolveVisualText(const char* text, std::string& visualBuffer);
+}  // namespace
+
 const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const {
   if (fontData->groups != nullptr) {
     auto* fd = fontCacheManager_ ? fontCacheManager_->getDecompressor() : nullptr;
@@ -196,14 +202,21 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
 }
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style) const {
+  if (text == nullptr || *text == '\0') {
+    return 0;
+  }
+
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
 
+  std::string visual;
+  const char* renderedText = resolveVisualText(text, visual);
+
   int w = 0, h = 0;
-  fontIt->second.getTextDimensions(text, &w, &h, style);
+  fontIt->second.getTextDimensions(renderedText, &w, &h, style);
   return w;
 }
 
@@ -215,6 +228,14 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style) const {
+  // cannot draw a NULL / empty string
+  if (text == nullptr || *text == '\0') {
+    return;
+  }
+
+  std::string visual;
+  const char* renderedText = resolveVisualText(text, visual);
+
   const int yPos = y + getFontAscenderSize(fontId);
   int lastBaseX = x;
   int lastBaseLeft = 0;
@@ -222,13 +243,8 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   int lastBaseTop = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
 
-  // cannot draw a NULL / empty string
-  if (text == nullptr || *text == '\0') {
-    return;
-  }
-
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
-    fontCacheManager_->recordText(text, fontId, style);
+    fontCacheManager_->recordText(renderedText, fontId, style);
     return;
   }
 
@@ -239,9 +255,10 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   }
   const auto& font = fontIt->second;
 
+  const char* textCursor = renderedText;
   uint32_t cp;
   uint32_t prevCp = 0;
-  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&textCursor)))) {
     // Skip Hebrew Niqqud (vowel marks)
     // Temporary: avoid adding Niqqud to built-in fonts. Remove when custom fonts are supported.
     if (cp >= 0x0591 && cp <= 0x05C7) {
@@ -258,7 +275,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       continue;
     }
 
-    cp = font.applyLigatures(cp, text, style);
+    cp = font.applyLigatures(cp, textCursor, style);
 
     // Differential rounding: snap (previous advance + current kern) as one unit so
     // identical character pairs always produce the same pixel step regardless of
@@ -283,7 +300,19 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 namespace {
 bool hasRtlCodepoint(const char* text) {
   if (!text) return false;
-  auto* p = reinterpret_cast<const unsigned char*>(text);
+
+  // Fast path for common ASCII-only strings.
+  auto* bytes = reinterpret_cast<const unsigned char*>(text);
+  bool hasNonAscii = false;
+  for (const unsigned char* q = bytes; *q; ++q) {
+    if ((*q & 0x80) != 0) {
+      hasNonAscii = true;
+      break;
+    }
+  }
+  if (!hasNonAscii) return false;
+
+  auto* p = bytes;
   while (*p) {
     uint32_t cp = utf8NextCodepoint(&p);
     if (cp == 0 || cp == REPLACEMENT_GLYPH) break;
@@ -295,46 +324,48 @@ bool hasRtlCodepoint(const char* text) {
 std::string buildVisualRtlText(const char* text) {
   if (!text || *text == '\0') return {};
 
-  std::vector<std::string> segments;
-  segments.reserve(12);
-
-  const char* p = text;
-  while (*p) {
-    const char* runStart = p;
-    const bool isSpaceRun = (*p == ' ');
-    while (*p && (*p == ' ') == isSpaceRun) {
-      p++;
-    }
-
-    std::string segment(runStart, static_cast<size_t>(p - runStart));
-    if (!isSpaceRun) {
-      ScriptDetector::reverseIfRtl(segment);
-    }
-    segments.push_back(std::move(segment));
-  }
-
   std::string visual;
-  visual.reserve(strlen(text));
-  for (auto it = segments.rbegin(); it != segments.rend(); ++it) {
-    visual += *it;
+  const size_t textLen = strlen(text);
+  visual.reserve(textLen);
+
+  std::string segment;
+  segment.reserve(32);
+
+  const char* runEnd = text + textLen;
+  while (runEnd > text) {
+    const bool isSpaceRun = (*(runEnd - 1) == ' ');
+    const char* runStart = runEnd - 1;
+    while (runStart > text && (*(runStart - 1) == ' ') == isSpaceRun) {
+      runStart--;
+    }
+
+    if (isSpaceRun) {
+      visual.append(runStart, static_cast<size_t>(runEnd - runStart));
+    } else {
+      segment.assign(runStart, static_cast<size_t>(runEnd - runStart));
+      ScriptDetector::reverseIfRtl(segment);
+      visual += segment;
+    }
+
+    runEnd = runStart;
   }
   return visual;
+}
+
+const char* resolveVisualText(const char* text, std::string& visualBuffer) {
+  if (!text || *text == '\0' || !hasRtlCodepoint(text)) {
+    return text;
+  }
+  visualBuffer = buildVisualRtlText(text);
+  return visualBuffer.c_str();
 }
 }  // namespace
 
 void GfxRenderer::drawTextRtl(const int fontId, const int rightX, const int y, const char* text, const bool black,
                               const EpdFontFamily::Style style) const {
   if (!text || *text == '\0') return;
-
-  if (!hasRtlCodepoint(text)) {
-    const int width = getTextWidth(fontId, text, style);
-    drawText(fontId, rightX - width, y, text, black, style);
-    return;
-  }
-
-  std::string visual = buildVisualRtlText(text);
-  const int width = getTextWidth(fontId, visual.c_str(), style);
-  drawText(fontId, rightX - width, y, visual.c_str(), black, style);
+  const int width = getTextWidth(fontId, text, style);
+  drawText(fontId, rightX - width, y, text, black, style);
 }
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {

@@ -18,8 +18,8 @@ bool startsWithRtl(const char* text, int maxLetters) {
     if (utf8IsCombiningMark(cp)) continue;
     // Only count letter codepoints — digits and punctuation don't indicate direction
     if (!isLetterCodepoint(cp)) continue;
-    if (isRtlCodepoint(cp)) return true;
     letterCount++;
+    return isRtlCodepoint(cp);
   }
   return false;
 }
@@ -46,8 +46,8 @@ static void utf8Encode(uint32_t cp, std::string& out) {
 void reverseIfRtl(std::string& word) {
   if (word.empty()) return;
 
-  // First pass: decode codepoints and check if any are RTL
-  uint32_t codepoints[64];  // stack buffer — words longer than 64 codepoints are rare
+  // Stack buffer — words longer than 64 codepoints are not expected for our supported languages.
+  uint32_t codepoints[64];
   size_t count = 0;
   bool hasRtl = false;
 
