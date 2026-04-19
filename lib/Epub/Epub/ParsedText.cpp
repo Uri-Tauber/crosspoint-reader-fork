@@ -629,7 +629,11 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
     if (isOppositeDir) {
       size_t runEnd = runStart + 1;
-      while (runEnd < n && classifyWordDirection(lineWords[runEnd]) == runDirection) {
+      while (runEnd < n) {
+        const WordDirection nextDirection = classifyWordDirection(lineWords[runEnd]);
+        if (nextDirection != runDirection && nextDirection != WordDirection::Neutral) {
+          break;
+        }
         runEnd++;
       }
 

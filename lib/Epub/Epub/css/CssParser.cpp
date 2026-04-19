@@ -345,10 +345,11 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
     style.display = (displayValue == "none") ? CssDisplay::None : CssDisplay::Block;
     style.defined.display = 1;
   } else if (propNameBuf == "direction") {
-    if (propValueBuf == "rtl") {
+    const std::string_view directionValue = stripTrailingImportant(propValueBuf);
+    if (directionValue == "rtl") {
       style.direction = CssTextDirection::Rtl;
       style.defined.direction = 1;
-    } else if (propValueBuf == "ltr") {
+    } else if (directionValue == "ltr") {
       style.direction = CssTextDirection::Ltr;
       style.defined.direction = 1;
     }

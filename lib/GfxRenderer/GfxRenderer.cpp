@@ -6,6 +6,8 @@
 #include <ScriptDetector.h>
 #include <Utf8.h>
 
+#include <cctype>
+
 #include "FontCacheManager.h"
 
 namespace {
@@ -331,12 +333,39 @@ std::string buildVisualRtlText(const char* text) {
   std::string segment;
   segment.reserve(32);
 
-  const char* runEnd = text + textLen;
-  while (runEnd > text) {
-    const bool isSpaceRun = (*(runEnd - 1) == ' ');
-    const char* runStart = runEnd - 1;
-    while (runStart > text && (*(runStart - 1) == ' ') == isSpaceRun) {
-      runStart--;
+  auto isWhitespace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+  const bool lineStartsRtl = ScriptDetector::startsWithRtl(text, 5);
+
+  if (lineStartsRtl) {
+    // RTL-base line: walk runs from end to start so word order is visually right-to-left.
+    const char* runEnd = text + textLen;
+    while (runEnd > text) {
+      const bool isSpaceRun = isWhitespace(static_cast<unsigned char>(*(runEnd - 1)));
+      const char* runStart = runEnd - 1;
+      while (runStart > text && isWhitespace(static_cast<unsigned char>(*(runStart - 1))) == isSpaceRun) {
+        runStart--;
+      }
+
+      if (isSpaceRun) {
+        visual.append(runStart, static_cast<size_t>(runEnd - runStart));
+      } else {
+        segment.assign(runStart, static_cast<size_t>(runEnd - runStart));
+        ScriptDetector::reverseIfRtl(segment);
+        visual += segment;
+      }
+
+      runEnd = runStart;
+    }
+    return visual;
+  }
+
+  // LTR-base line: keep run order and only flip RTL glyph order per run.
+  const char* runStart = text;
+  while (*runStart) {
+    const bool isSpaceRun = isWhitespace(static_cast<unsigned char>(*runStart));
+    const char* runEnd = runStart + 1;
+    while (*runEnd && isWhitespace(static_cast<unsigned char>(*runEnd)) == isSpaceRun) {
+      runEnd++;
     }
 
     if (isSpaceRun) {
@@ -347,7 +376,7 @@ std::string buildVisualRtlText(const char* text) {
       visual += segment;
     }
 
-    runEnd = runStart;
+    runStart = runEnd;
   }
   return visual;
 }
