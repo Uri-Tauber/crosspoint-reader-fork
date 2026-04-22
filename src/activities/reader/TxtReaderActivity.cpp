@@ -1,10 +1,10 @@
 #include "TxtReaderActivity.h"
 
+#include <BidiUtils.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <ScriptDetector.h>
 #include <Serialization.h>
 #include <Utf8.h>
 
@@ -342,7 +342,7 @@ void TxtReaderActivity::renderPage() {
     for (const auto& line : currentPageLines) {
       if (!line.empty()) {
         int x = cachedOrientedMarginLeft;
-        const bool lineIsRtl = ScriptDetector::startsWithRtl(line.c_str(), RTL_DETECTION_SCAN_LETTERS);
+        const bool lineIsRtl = BidiUtils::startsWithRtl(line.c_str(), RTL_DETECTION_SCAN_LETTERS);
         uint8_t effectiveAlignment = cachedParagraphAlignment;
         if (lineIsRtl && (effectiveAlignment == CrossPointSettings::LEFT_ALIGN ||
                           effectiveAlignment == CrossPointSettings::JUSTIFIED)) {

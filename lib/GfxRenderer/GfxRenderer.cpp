@@ -1,18 +1,14 @@
 #include "GfxRenderer.h"
 
+#include <BidiUtils.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
-#include <ScriptDetector.h>
 #include <Utf8.h>
-
-#include <cctype>
 
 #include "FontCacheManager.h"
 
 namespace {
-bool hasRtlCodepoint(const char* text);
-std::string buildVisualRtlText(const char* text);
 const char* resolveVisualText(const char* text, std::string& visualBuffer);
 }  // namespace
 
@@ -300,93 +296,18 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 }
 
 namespace {
-bool hasRtlCodepoint(const char* text) {
-  if (!text) return false;
-
-  // Fast path for common ASCII-only strings.
-  auto* bytes = reinterpret_cast<const unsigned char*>(text);
+const char* resolveVisualText(const char* text, std::string& visualBuffer) {
+  if (!text || *text == '\0') return text;
   bool hasNonAscii = false;
-  for (const unsigned char* q = bytes; *q; ++q) {
-    if ((*q & 0x80) != 0) {
+  for (const unsigned char* q = reinterpret_cast<const unsigned char*>(text); *q; ++q) {
+    if (*q >= 0x80) {
       hasNonAscii = true;
       break;
     }
   }
-  if (!hasNonAscii) return false;
-
-  auto* p = bytes;
-  while (*p) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0 || cp == REPLACEMENT_GLYPH) break;
-    if (ScriptDetector::isRtlCodepoint(cp)) return true;
-  }
-  return false;
-}
-
-std::string buildVisualRtlText(const char* text) {
-  if (!text || *text == '\0') return {};
-
-  std::string visual;
-  const size_t textLen = strlen(text);
-  visual.reserve(textLen);
-
-  std::string segment;
-  segment.reserve(32);
-
-  auto isWhitespace = [](unsigned char ch) { return std::isspace(ch) != 0; };
-  const bool lineStartsRtl = ScriptDetector::startsWithRtl(text, 5);
-
-  if (lineStartsRtl) {
-    // RTL-base line: walk runs from end to start so word order is visually right-to-left.
-    const char* runEnd = text + textLen;
-    while (runEnd > text) {
-      const bool isSpaceRun = isWhitespace(static_cast<unsigned char>(*(runEnd - 1)));
-      const char* runStart = runEnd - 1;
-      while (runStart > text && isWhitespace(static_cast<unsigned char>(*(runStart - 1))) == isSpaceRun) {
-        runStart--;
-      }
-
-      if (isSpaceRun) {
-        visual.append(runStart, static_cast<size_t>(runEnd - runStart));
-      } else {
-        segment.assign(runStart, static_cast<size_t>(runEnd - runStart));
-        ScriptDetector::reverseIfRtl(segment);
-        visual += segment;
-      }
-
-      runEnd = runStart;
-    }
-    return visual;
-  }
-
-  // LTR-base line: keep run order and only flip RTL glyph order per run.
-  const char* runStart = text;
-  while (*runStart) {
-    const bool isSpaceRun = isWhitespace(static_cast<unsigned char>(*runStart));
-    const char* runEnd = runStart + 1;
-    while (*runEnd && isWhitespace(static_cast<unsigned char>(*runEnd)) == isSpaceRun) {
-      runEnd++;
-    }
-
-    if (isSpaceRun) {
-      visual.append(runStart, static_cast<size_t>(runEnd - runStart));
-    } else {
-      segment.assign(runStart, static_cast<size_t>(runEnd - runStart));
-      ScriptDetector::reverseIfRtl(segment);
-      visual += segment;
-    }
-
-    runStart = runEnd;
-  }
-  return visual;
-}
-
-const char* resolveVisualText(const char* text, std::string& visualBuffer) {
-  if (!text || *text == '\0' || !hasRtlCodepoint(text)) {
-    return text;
-  }
-  visualBuffer = buildVisualRtlText(text);
-  return visualBuffer.c_str();
+  if (!hasNonAscii) return text;
+  visualBuffer = BidiUtils::applyBidiVisual(text, /*paragraphLevel=*/-1);
+  return visualBuffer.empty() ? text : visualBuffer.c_str();
 }
 }  // namespace
 

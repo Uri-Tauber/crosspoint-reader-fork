@@ -1,7 +1,7 @@
 #include "ParsedText.h"
 
+#include <BidiUtils.h>
 #include <GfxRenderer.h>
-#include <ScriptDetector.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -21,8 +21,6 @@ constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
 constexpr int RTL_DETECTION_SCAN_LETTERS = 5;
 constexpr size_t RTL_DETECTION_SCAN_WORDS = 3;
-
-enum class WordDirection { Neutral, Ltr, Rtl };
 
 // Returns the first rendered codepoint of a word (skipping leading soft hyphens).
 uint32_t firstCodepoint(const std::string& word) {
@@ -54,17 +52,6 @@ void stripSoftHyphensInPlace(std::string& word) {
   while ((pos = word.find(SOFT_HYPHEN_UTF8, pos)) != std::string::npos) {
     word.erase(pos, SOFT_HYPHEN_BYTES);
   }
-}
-
-WordDirection classifyWordDirection(const std::string& word) {
-  auto* p = reinterpret_cast<const unsigned char*>(word.c_str());
-  while (*p) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0 || cp == REPLACEMENT_GLYPH) break;
-    if (!ScriptDetector::isLetterCodepoint(cp)) continue;
-    return ScriptDetector::isRtlCodepoint(cp) ? WordDirection::Rtl : WordDirection::Ltr;
-  }
-  return WordDirection::Neutral;
 }
 
 bool isNaturalAlignment(const BlockStyle& blockStyle) {
@@ -124,7 +111,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     // Check the first few words for RTL letter codepoints (no heap allocation).
     const size_t wordsToScan = std::min(words.size(), RTL_DETECTION_SCAN_WORDS);
     for (size_t i = 0; i < wordsToScan; ++i) {
-      if (ScriptDetector::startsWithRtl(words[i].c_str(), RTL_DETECTION_SCAN_LETTERS)) {
+      if (BidiUtils::startsWithRtl(words[i].c_str(), RTL_DETECTION_SCAN_LETTERS)) {
         blockStyle.isRtl = true;
         break;
       }
@@ -617,63 +604,27 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
   }
 
-  // BiDi processing: reorder opposite-direction runs
-  // RTL paragraphs have LTR runs that need left-to-right order
-  // LTR paragraphs have RTL runs that need right-to-left order
-  const size_t n = lineWords.size();
-  size_t runStart = 0;
-  while (runStart < n) {
-    const WordDirection runDirection = classifyWordDirection(lineWords[runStart]);
-    const bool isOppositeDir = (blockStyle.isRtl && runDirection == WordDirection::Ltr) ||
-                               (!blockStyle.isRtl && runDirection == WordDirection::Rtl);
+  // BiDi processing: reorder words with UAX#9 in full-line context.
+  {
+    std::vector<uint16_t> visualOrder;
+    visualOrder.reserve(lineWords.size());
+    if (BidiUtils::computeVisualWordOrder(lineWords, blockStyle.isRtl, visualOrder)) {
+      std::vector<std::string> newWords;
+      std::vector<int16_t> newXPos;
+      std::vector<EpdFontFamily::Style> newStyles;
+      newWords.reserve(visualOrder.size());
+      newXPos.reserve(visualOrder.size());
+      newStyles.reserve(visualOrder.size());
 
-    if (isOppositeDir) {
-      size_t runEnd = runStart + 1;
-      while (runEnd < n) {
-        const WordDirection nextDirection = classifyWordDirection(lineWords[runEnd]);
-        if (nextDirection != runDirection && nextDirection != WordDirection::Neutral) {
-          break;
-        }
-        runEnd++;
+      for (const uint16_t src : visualOrder) {
+        newWords.push_back(std::move(lineWords[src]));
+        newXPos.push_back(lineXPos[src]);
+        newStyles.push_back(lineWordStyles[src]);
       }
 
-      if (runEnd - runStart > 1) {
-        // Calculate average gap from original positions
-        int totalGap = 0;
-        for (size_t i = runStart; i < runEnd - 1; i++) {
-          int gap;
-          if (blockStyle.isRtl) {
-            // RTL paragraph: positions decrease, next word is at lower X
-            gap = lineXPos[i] - lineXPos[i + 1] - wordWidths[lastBreakAt + i + 1];
-          } else {
-            // LTR paragraph: positions increase, next word is at higher X
-            gap = lineXPos[i + 1] - lineXPos[i] - wordWidths[lastBreakAt + i];
-          }
-          totalGap += gap;
-        }
-        int avgGap = totalGap / static_cast<int>(runEnd - runStart - 1);
-
-        if (blockStyle.isRtl) {
-          // LTR run in RTL paragraph: recalculate left-to-right from leftmost position
-          int xpos = lineXPos[runEnd - 1];  // Leftmost position
-          for (size_t i = runStart; i < runEnd; i++) {
-            lineXPos[i] = static_cast<int16_t>(xpos);
-            xpos += wordWidths[lastBreakAt + i] + avgGap;
-          }
-        } else {
-          // RTL run in LTR paragraph: recalculate right-to-left from rightmost position
-          // rightmost = pos[runEnd-1] + width[runEnd-1]
-          int xpos = lineXPos[runEnd - 1] + wordWidths[lastBreakAt + runEnd - 1];
-          for (size_t i = runStart; i < runEnd; i++) {
-            xpos -= wordWidths[lastBreakAt + i];
-            lineXPos[i] = static_cast<int16_t>(xpos);
-            xpos -= avgGap;
-          }
-        }
-      }
-      runStart = runEnd;
-    } else {
-      runStart++;
+      lineWords = std::move(newWords);
+      lineXPos = std::move(newXPos);
+      lineWordStyles = std::move(newStyles);
     }
   }
 
