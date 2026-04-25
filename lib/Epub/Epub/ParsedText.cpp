@@ -612,14 +612,87 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       std::vector<std::string> newWords;
       std::vector<int16_t> newXPos;
       std::vector<EpdFontFamily::Style> newStyles;
+      std::vector<uint16_t> newWordWidths;
+      std::vector<bool> newWordContinues;
       newWords.reserve(visualOrder.size());
       newXPos.reserve(visualOrder.size());
       newStyles.reserve(visualOrder.size());
+      newWordWidths.reserve(visualOrder.size());
+      newWordContinues.reserve(visualOrder.size());
 
-      for (const uint16_t src : visualOrder) {
+      for (size_t i = 0; i < visualOrder.size(); ++i) {
+        const uint16_t src = visualOrder[i];
         newWords.push_back(std::move(lineWords[src]));
-        newXPos.push_back(lineXPos[src]);
         newStyles.push_back(lineWordStyles[src]);
+        newWordWidths.push_back(wordWidths[lastBreakAt + src]);
+
+        // A continuation relation is tied to (src-1 -> src). Keep it only if that
+        // predecessor remains immediately before src after visual reordering.
+        bool continues = false;
+        if (src > 0 && continuesVec[lastBreakAt + src] && i > 0) {
+          continues = visualOrder[i - 1] == static_cast<uint16_t>(src - 1);
+        }
+        newWordContinues.push_back(continues);
+      }
+
+      int reorderedWordWidthSum = 0;
+      size_t reorderedGapCount = 0;
+      int reorderedNaturalGaps = 0;
+      for (size_t wordIdx = 0; wordIdx < newWordWidths.size(); wordIdx++) {
+        reorderedWordWidthSum += newWordWidths[wordIdx];
+        if (wordIdx > 0 && !newWordContinues[wordIdx]) {
+          reorderedGapCount++;
+          reorderedNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(newWords[wordIdx - 1]),
+                                                           firstCodepoint(newWords[wordIdx]), newStyles[wordIdx - 1]);
+        } else if (wordIdx > 0 && newWordContinues[wordIdx]) {
+          reorderedNaturalGaps += renderer.getKerning(fontId, lastCodepoint(newWords[wordIdx - 1]),
+                                                      firstCodepoint(newWords[wordIdx]), newStyles[wordIdx - 1]);
+        }
+      }
+
+      const int reorderedSpare = effectivePageWidth - reorderedWordWidthSum - reorderedNaturalGaps;
+      const int reorderedJustifyExtra =
+          (effectiveAlignment == CssTextAlign::Justify && !isLastLine && reorderedGapCount >= 1)
+              ? reorderedSpare / static_cast<int>(reorderedGapCount)
+              : 0;
+
+      const int justifyContribution = (effectiveAlignment == CssTextAlign::Justify && !isLastLine)
+                                          ? reorderedJustifyExtra * static_cast<int>(reorderedGapCount)
+                                          : 0;
+      const int contentWidth = reorderedWordWidthSum + reorderedNaturalGaps + justifyContribution;
+
+      int xpos = 0;
+      if (blockStyle.isRtl) {
+        if (effectiveAlignment == CssTextAlign::Right || effectiveAlignment == CssTextAlign::Justify) {
+          xpos = effectivePageWidth - contentWidth;
+        } else if (effectiveAlignment == CssTextAlign::Center) {
+          xpos = (effectivePageWidth - contentWidth) / 2;
+        }
+      } else {
+        xpos = firstLineIndent;
+        if (effectiveAlignment == CssTextAlign::Right) {
+          xpos = effectivePageWidth - contentWidth;
+        } else if (effectiveAlignment == CssTextAlign::Center) {
+          xpos = (effectivePageWidth - contentWidth) / 2;
+        }
+      }
+
+      for (size_t wordIdx = 0; wordIdx < newWordWidths.size(); wordIdx++) {
+        newXPos.push_back(static_cast<int16_t>(xpos < 0 ? 0 : xpos));
+        xpos += newWordWidths[wordIdx];
+
+        const bool nextIsContinuation = wordIdx + 1 < newWordWidths.size() && newWordContinues[wordIdx + 1];
+        if (nextIsContinuation) {
+          xpos += renderer.getKerning(fontId, lastCodepoint(newWords[wordIdx]), firstCodepoint(newWords[wordIdx + 1]),
+                                      newStyles[wordIdx]);
+        } else if (wordIdx + 1 < newWordWidths.size()) {
+          int gap = renderer.getSpaceAdvance(fontId, lastCodepoint(newWords[wordIdx]),
+                                             firstCodepoint(newWords[wordIdx + 1]), newStyles[wordIdx]);
+          if (effectiveAlignment == CssTextAlign::Justify && !isLastLine) {
+            gap += reorderedJustifyExtra;
+          }
+          xpos += gap;
+        }
       }
 
       lineWords = std::move(newWords);

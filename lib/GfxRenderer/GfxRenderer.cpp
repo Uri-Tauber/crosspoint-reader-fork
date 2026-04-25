@@ -299,14 +299,20 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 namespace {
 const char* resolveVisualText(const char* text, std::string& visualBuffer, const int paragraphLevel) {
   if (!text || *text == '\0') return text;
-  bool hasNonAscii = false;
-  for (const unsigned char* q = reinterpret_cast<const unsigned char*>(text); *q; ++q) {
-    if (*q >= 0x80) {
-      hasNonAscii = true;
-      break;
+
+  // ASCII-only fast path is safe for autodir/LTR, but not for explicit RTL:
+  // tokens like "123." or "," still need UAX#9 neutral resolution in RTL paragraphs.
+  if (paragraphLevel != 1) {
+    bool hasNonAscii = false;
+    for (const unsigned char* q = reinterpret_cast<const unsigned char*>(text); *q; ++q) {
+      if (*q >= 0x80) {
+        hasNonAscii = true;
+        break;
+      }
     }
+    if (!hasNonAscii) return text;
   }
-  if (!hasNonAscii) return text;
+
   visualBuffer = BidiUtils::applyBidiVisual(text, paragraphLevel);
   return visualBuffer.empty() ? text : visualBuffer.c_str();
 }

@@ -136,25 +136,32 @@ bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragrap
     prevWord = static_cast<int>(w);
   }
 
-  for (size_t i = 0; i < nWords; i++) {
-    if (!seen[i]) {
-      visualOrder.push_back(static_cast<uint16_t>(i));
-    }
-  }
-
   if (visualOrder.size() != nWords) {
     visualOrder.clear();
     return false;
   }
 
+  // Check if the order is exactly the same as the original input
+  bool needsReorder = false;
   for (size_t i = 0; i < nWords; i++) {
     if (visualOrder[i] != i) {
-      return true;
+      needsReorder = true;
+      break;
     }
   }
 
-  visualOrder.clear();
-  return false;
+  // If the paragraph is RTL, we MUST pass the array back to ParsedText
+  // so it uses the explicit Left-to-Right layout math loop.
+  if (paragraphIsRtl) {
+    needsReorder = true;
+  }
+
+  if (!needsReorder) {
+    visualOrder.clear();
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace BidiUtils
