@@ -31,6 +31,19 @@ void appendUtf8(uint32_t cp, std::string& out) {
   }
 }
 
+bool isNaturalDirectionClass(const uchar cls) {
+  switch (cls) {
+    case L:
+    case R:
+    case AL:
+    case EN:
+    case AN:
+      return true;
+    default:
+      return false;
+  }
+}
+
 }  // namespace
 
 namespace BidiUtils {
@@ -51,6 +64,26 @@ bool startsWithRtl(const char* utf8, int maxStrongChars) {
     if (checked >= maxStrongChars) break;
   }
   return false;
+}
+
+int detectParagraphLevel(const char* utf8, const int fallbackLevel, const int maxStrongChars) {
+  if (!utf8 || maxStrongChars <= 0) return fallbackLevel & 1;
+
+  auto* p = reinterpret_cast<const unsigned char*>(utf8);
+  int checked = 0;
+  while (*p) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!cp || cp == REPLACEMENT_GLYPH) break;
+
+    const uchar cls = bidi_class(cp);
+    if (cls == R || cls == AL) return 1;
+    if (cls == L) return 0;
+    if (cls == EN || cls == AN) return 0;
+    checked++;
+    if (checked >= maxStrongChars) break;
+  }
+
+  return fallbackLevel & 1;
 }
 
 std::string applyBidiVisual(const char* utf8, int paragraphLevel) {
@@ -124,16 +157,39 @@ bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragrap
 
   do_bidi(/*autodir=*/false, paragraphIsRtl ? 1 : 0, line, count);
 
-  uint8_t seen[BIDI_MAX_LINE] = {0};
-  int prevWord = -1;
+  uint16_t firstAny[BIDI_MAX_LINE];
+  uint16_t firstNatural[BIDI_MAX_LINE];
+  for (size_t w = 0; w < nWords; w++) {
+    firstAny[w] = UINT16_MAX;
+    firstNatural[w] = UINT16_MAX;
+  }
+
   for (int i = 0; i < count; i++) {
     const uint16_t w = line[i].index;
     if (w >= nWords) continue;
-    if (w != prevWord && !seen[w]) {
-      visualOrder.push_back(w);
-      seen[w] = 1;
+
+    if (firstAny[w] == UINT16_MAX) {
+      firstAny[w] = static_cast<uint16_t>(i);
     }
-    prevWord = static_cast<int>(w);
+
+    if (firstNatural[w] == UINT16_MAX && isNaturalDirectionClass(bidi_class(line[i].wc))) {
+      firstNatural[w] = static_cast<uint16_t>(i);
+    }
+  }
+
+  visualOrder.reserve(nWords);
+  for (int i = 0; i < count; i++) {
+    const uint16_t w = line[i].index;
+    if (w >= nWords) continue;
+
+    const uint16_t anchor = firstNatural[w] != UINT16_MAX ? firstNatural[w] : firstAny[w];
+    if (anchor == UINT16_MAX) {
+      visualOrder.clear();
+      return false;
+    }
+    if (anchor == static_cast<uint16_t>(i)) {
+      visualOrder.push_back(w);
+    }
   }
 
   if (visualOrder.size() != nWords) {

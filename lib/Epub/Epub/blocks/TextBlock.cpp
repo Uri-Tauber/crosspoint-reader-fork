@@ -1,5 +1,6 @@
 #include "TextBlock.h"
 
+#include <BidiUtils.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Serialization.h>
@@ -15,7 +16,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   for (size_t i = 0; i < words.size(); i++) {
     const int wordX = wordXpos[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyles[i];
-    const int paragraphLevel = blockStyle.isRtl ? 1 : 0;
+    const int paragraphLevel = BidiUtils::detectParagraphLevel(words[i].c_str(), blockStyle.isRtl ? 1 : 0);
     renderer.drawText(fontId, wordX, y, words[i].c_str(), true, currentStyle, paragraphLevel);
 
     if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
