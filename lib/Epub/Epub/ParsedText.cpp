@@ -20,6 +20,7 @@ namespace {
 constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
 constexpr size_t RTL_DETECTION_SCAN_WORDS = 3;
+constexpr int RTL_CONTENT_SCAN_LETTERS = 64;
 
 // Returns the first rendered codepoint of a word (skipping leading soft hyphens).
 uint32_t firstCodepoint(const std::string& word) {
@@ -89,6 +90,10 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   }
   wordStyles.push_back(combinedStyle);
   wordContinues.push_back(attachToPrevious);
+
+  if (!hasRtlWord && BidiUtils::startsWithRtl(words.back().c_str(), RTL_CONTENT_SCAN_LETTERS)) {
+    hasRtlWord = true;
+  }
 }
 
 int ParsedText::resolveFirstLineIndent(const bool isFirstLine) const {
@@ -109,7 +114,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
 
   // Per-paragraph RTL auto-detection: only when CSS/HTML didn't explicitly set direction.
   // Explicit dir="ltr" must be respected and not overridden by content heuristic.
-  if (!blockStyle.directionDefined) {
+  if (!blockStyle.directionDefined && hasRtlWord) {
     // Check the first few words for RTL letter codepoints (no heap allocation).
     const size_t wordsToScan = std::min(words.size(), RTL_DETECTION_SCAN_WORDS);
     for (size_t i = 0; i < wordsToScan; ++i) {
@@ -511,26 +516,29 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   // BiDi processing: reorder words with UAX#9 in full-line context.
   std::vector<uint16_t> visualOrder;
   visualOrder.reserve(lineWords.size());
-  const bool willReorder = BidiUtils::computeVisualWordOrder(lineWords, blockStyle.isRtl, visualOrder);
+  // Skip expensive visual-order resolution for pure LTR paragraphs that have no RTL words.
+  const bool shouldResolveVisualOrder = blockStyle.isRtl || hasRtlWord;
+  const bool willReorder =
+      shouldResolveVisualOrder && BidiUtils::computeVisualWordOrder(lineWords, blockStyle.isRtl, visualOrder);
 
   std::vector<int16_t> lineXPos;
   lineXPos.reserve(lineWordCount);
 
   if (willReorder) {
-    std::vector<std::string> newWords;
-    std::vector<EpdFontFamily::Style> newStyles;
-    std::vector<uint16_t> newWordWidths;
-    std::vector<bool> newWordContinues;
-    newWords.reserve(visualOrder.size());
-    newStyles.reserve(visualOrder.size());
-    newWordWidths.reserve(visualOrder.size());
-    newWordContinues.reserve(visualOrder.size());
+    reorderedWordsScratch.clear();
+    reorderedStylesScratch.clear();
+    reorderedWidthsScratch.clear();
+    reorderedContinuesScratch.clear();
+    reorderedWordsScratch.reserve(visualOrder.size());
+    reorderedStylesScratch.reserve(visualOrder.size());
+    reorderedWidthsScratch.reserve(visualOrder.size());
+    reorderedContinuesScratch.reserve(visualOrder.size());
 
     for (size_t i = 0; i < visualOrder.size(); ++i) {
       const uint16_t src = visualOrder[i];
-      newWords.push_back(std::move(lineWords[src]));
-      newStyles.push_back(lineWordStyles[src]);
-      newWordWidths.push_back(wordWidths[lastBreakAt + src]);
+      reorderedWordsScratch.push_back(std::move(lineWords[src]));
+      reorderedStylesScratch.push_back(lineWordStyles[src]);
+      reorderedWidthsScratch.push_back(wordWidths[lastBreakAt + src]);
 
       // A continuation relation is tied to (src-1 -> src). Keep it only if that
       // predecessor remains immediately before src after visual reordering.
@@ -538,21 +546,23 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       if (src > 0 && continuesVec[lastBreakAt + src] && i > 0) {
         continues = visualOrder[i - 1] == static_cast<uint16_t>(src - 1);
       }
-      newWordContinues.push_back(continues);
+      reorderedContinuesScratch.push_back(continues);
     }
 
     int reorderedWordWidthSum = 0;
     size_t reorderedGapCount = 0;
     int reorderedNaturalGaps = 0;
-    for (size_t wordIdx = 0; wordIdx < newWordWidths.size(); wordIdx++) {
-      reorderedWordWidthSum += newWordWidths[wordIdx];
-      if (wordIdx > 0 && !newWordContinues[wordIdx]) {
+    for (size_t wordIdx = 0; wordIdx < reorderedWidthsScratch.size(); wordIdx++) {
+      reorderedWordWidthSum += reorderedWidthsScratch[wordIdx];
+      if (wordIdx > 0 && !reorderedContinuesScratch[wordIdx]) {
         reorderedGapCount++;
-        reorderedNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(newWords[wordIdx - 1]),
-                                                         firstCodepoint(newWords[wordIdx]), newStyles[wordIdx - 1]);
-      } else if (wordIdx > 0 && newWordContinues[wordIdx]) {
-        reorderedNaturalGaps += renderer.getKerning(fontId, lastCodepoint(newWords[wordIdx - 1]),
-                                                    firstCodepoint(newWords[wordIdx]), newStyles[wordIdx - 1]);
+        reorderedNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(reorderedWordsScratch[wordIdx - 1]),
+                                                         firstCodepoint(reorderedWordsScratch[wordIdx]),
+                                                         reorderedStylesScratch[wordIdx - 1]);
+      } else if (wordIdx > 0 && reorderedContinuesScratch[wordIdx]) {
+        reorderedNaturalGaps +=
+            renderer.getKerning(fontId, lastCodepoint(reorderedWordsScratch[wordIdx - 1]),
+                                firstCodepoint(reorderedWordsScratch[wordIdx]), reorderedStylesScratch[wordIdx - 1]);
       }
     }
 
@@ -583,17 +593,20 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       }
     }
 
-    for (size_t wordIdx = 0; wordIdx < newWordWidths.size(); wordIdx++) {
+    for (size_t wordIdx = 0; wordIdx < reorderedWidthsScratch.size(); wordIdx++) {
       lineXPos.push_back(static_cast<int16_t>(xpos < 0 ? 0 : xpos));
-      xpos += newWordWidths[wordIdx];
+      xpos += reorderedWidthsScratch[wordIdx];
 
-      const bool nextIsContinuation = wordIdx + 1 < newWordWidths.size() && newWordContinues[wordIdx + 1];
+      const bool nextIsContinuation =
+          wordIdx + 1 < reorderedWidthsScratch.size() && reorderedContinuesScratch[wordIdx + 1];
       if (nextIsContinuation) {
-        xpos += renderer.getKerning(fontId, lastCodepoint(newWords[wordIdx]), firstCodepoint(newWords[wordIdx + 1]),
-                                    newStyles[wordIdx]);
-      } else if (wordIdx + 1 < newWordWidths.size()) {
-        int gap = renderer.getSpaceAdvance(fontId, lastCodepoint(newWords[wordIdx]),
-                                           firstCodepoint(newWords[wordIdx + 1]), newStyles[wordIdx]);
+        xpos +=
+            renderer.getKerning(fontId, lastCodepoint(reorderedWordsScratch[wordIdx]),
+                                firstCodepoint(reorderedWordsScratch[wordIdx + 1]), reorderedStylesScratch[wordIdx]);
+      } else if (wordIdx + 1 < reorderedWidthsScratch.size()) {
+        int gap = renderer.getSpaceAdvance(fontId, lastCodepoint(reorderedWordsScratch[wordIdx]),
+                                           firstCodepoint(reorderedWordsScratch[wordIdx + 1]),
+                                           reorderedStylesScratch[wordIdx]);
         if (effectiveAlignment == CssTextAlign::Justify && !isLastLine) {
           gap += reorderedJustifyExtra;
         }
@@ -601,8 +614,8 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       }
     }
 
-    lineWords = std::move(newWords);
-    lineWordStyles = std::move(newStyles);
+    lineWords.swap(reorderedWordsScratch);
+    lineWordStyles.swap(reorderedStylesScratch);
   } else {
     // Standard LTR/RTL positioning loop when no visual reordering is needed
     if (blockStyle.isRtl) {

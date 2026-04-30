@@ -20,6 +20,11 @@ class ParsedText {
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool isNaturalAlign;
+  bool hasRtlWord;
+  std::vector<std::string> reorderedWordsScratch;
+  std::vector<EpdFontFamily::Style> reorderedStylesScratch;
+  std::vector<uint16_t> reorderedWidthsScratch;
+  std::vector<bool> reorderedContinuesScratch;
 
   void applyParagraphIndent();
   int resolveFirstLineIndent(bool isFirstLine) const;
@@ -41,7 +46,8 @@ class ParsedText {
       : blockStyle(blockStyle),
         extraParagraphSpacing(extraParagraphSpacing),
         hyphenationEnabled(hyphenationEnabled),
-        isNaturalAlign(false) {}
+        isNaturalAlign(false),
+        hasRtlWord(false) {}
   ~ParsedText() = default;
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false);
