@@ -7,6 +7,7 @@ extern "C" {
 #undef when
 #undef otherwise
 
+#include <Logging.h>
 #include <Utf8.h>
 
 #include <cstring>
@@ -76,7 +77,7 @@ std::string applyBidiVisual(const char* utf8, int paragraphLevel) {
   auto* p = reinterpret_cast<const unsigned char*>(utf8);
   while (*p) {
     if (count >= BIDI_MAX_LINE) {
-      // Keep original text when the input is longer than the mini-bidi working buffer.
+      LOG_DBG("BIDI", "applyBidiVisual: input exceeds BIDI_MAX_LINE (%d chars), returning unprocessed", BIDI_MAX_LINE);
       return utf8;
     }
 

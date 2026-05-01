@@ -300,31 +300,25 @@ namespace {
 const char* resolveVisualText(const char* text, std::string& visualBuffer, const int paragraphLevel) {
   if (!text || *text == '\0') return text;
 
-  // ASCII-only fast path is safe for autodir/LTR, but not for explicit RTL:
-  // tokens like "123." or "," still need UAX#9 neutral resolution in RTL paragraphs.
-  bool hasNonAscii = false;
-  for (const unsigned char* q = reinterpret_cast<const unsigned char*>(text); *q; ++q) {
-    if (*q >= 0x80) {
-      hasNonAscii = true;
-      break;
-    }
-  }
-
   if (paragraphLevel != 1) {
-    if (!hasNonAscii) return text;
+    // Byte-level scan: skip BiDi when no RTL script lead bytes are present.
+    // Hebrew UTF-8 lead bytes: 0xD6-0xD7; Arabic/Syriac: 0xD8-0xDB.
+    // This covers all RTL content without false negatives and avoids triggering
+    // the full UAX#9 algorithm for Latin-extended, em-dashes, accented text, etc.
+    bool hasRtlBytes = false;
+    for (const unsigned char* q = reinterpret_cast<const unsigned char*>(text); *q; ++q) {
+      if (*q >= 0xD6 && *q <= 0xDB) {
+        hasRtlBytes = true;
+        break;
+      }
+    }
+    if (!hasRtlBytes) return text;
   }
 
   visualBuffer = BidiUtils::applyBidiVisual(text, paragraphLevel);
   return visualBuffer.empty() ? text : visualBuffer.c_str();
 }
 }  // namespace
-
-void GfxRenderer::drawTextRtl(const int fontId, const int rightX, const int y, const char* text, const bool black,
-                              const EpdFontFamily::Style style) const {
-  if (!text || *text == '\0') return;
-  const int width = getTextWidth(fontId, text, style, /*paragraphLevel=*/1);
-  drawText(fontId, rightX - width, y, text, black, style, /*paragraphLevel=*/1);
-}
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;

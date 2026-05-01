@@ -6,9 +6,10 @@
 
 namespace BidiUtils {
 
-inline constexpr int RTL_DETECTION_SCAN_LETTERS = 5;
+// Paragraph-level P2/P3: scan the first N strong chars per word to find base direction.
+inline constexpr int RTL_PARAGRAPH_PROBE_DEPTH = 5;
 
-bool startsWithRtl(const char* utf8, int maxStrongChars = RTL_DETECTION_SCAN_LETTERS);
+bool startsWithRtl(const char* utf8, int maxStrongChars = RTL_PARAGRAPH_PROBE_DEPTH);
 
 int detectParagraphLevel(const char* utf8, int fallbackLevel = 0, int maxStrongChars = 64);
 

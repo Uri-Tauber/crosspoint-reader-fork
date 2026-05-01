@@ -111,6 +111,10 @@ struct CssPropertyFlags {
   }
 };
 
+// Cache serializes defined flags as uint32_t with bit indices 0..16.
+static_assert(sizeof(CssPropertyFlags) <= sizeof(uint32_t),
+              "CssPropertyFlags exceeds 32 bits; update cache read/write in CssParser.cpp");
+
 // Represents a collection of CSS style properties
 // Only stores properties relevant to e-ink text rendering
 // Length values are stored as CssLength (value + unit) for deferred resolution

@@ -114,7 +114,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // Keep inherited direction in the active empty text block so upcoming block starts
   // can inherit from non-block ancestors such as <html dir="rtl"> / <body dir="rtl">.
   if (currentTextBlock && currentTextBlock->isEmpty()) {
-    auto style = currentTextBlock->getBlockStyle();
+    auto& style = currentTextBlock->getBlockStyle();
     if (effectiveDirectionDefined) {
       style.directionDefined = true;
       style.isRtl = (effectiveDirection == CssTextDirection::Rtl);
@@ -122,7 +122,6 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
       style.directionDefined = false;
       style.isRtl = false;
     }
-    currentTextBlock->setBlockStyle(style);
   }
 }
 

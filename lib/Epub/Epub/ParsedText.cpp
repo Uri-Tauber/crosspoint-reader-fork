@@ -19,8 +19,19 @@ namespace {
 // Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
 constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
-constexpr size_t RTL_DETECTION_SCAN_WORDS = 3;
-constexpr int RTL_CONTENT_SCAN_LETTERS = 64;
+// Paragraph-level direction: scan the first N words to find base direction.
+constexpr size_t RTL_PARAGRAPH_PROBE_WORDS = 3;
+// Per-word: scan enough chars to see through leading neutrals (quotes, numbers)
+// before giving up. 64 is a hedge for pathological cases like long numeric tokens.
+constexpr int RTL_PER_WORD_PROBE_DEPTH = 64;
+
+// Byte-level pre-check: Hebrew UTF-8 lead bytes 0xD6-0xD7, Arabic/Syriac 0xD8-0xDB.
+bool mayContainRtlBytes(const char* str) {
+  for (const auto* p = reinterpret_cast<const unsigned char*>(str); *p; ++p) {
+    if (*p >= 0xD6 && *p <= 0xDB) return true;
+  }
+  return false;
+}
 
 // Returns the first rendered codepoint of a word (skipping leading soft hyphens).
 uint32_t firstCodepoint(const std::string& word) {
@@ -91,7 +102,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   wordStyles.push_back(combinedStyle);
   wordContinues.push_back(attachToPrevious);
 
-  if (!hasRtlWord && BidiUtils::startsWithRtl(words.back().c_str(), RTL_CONTENT_SCAN_LETTERS)) {
+  if (!hasRtlWord && mayContainRtlBytes(words.back().c_str()) &&
+      BidiUtils::startsWithRtl(words.back().c_str(), RTL_PER_WORD_PROBE_DEPTH)) {
     hasRtlWord = true;
   }
 }
@@ -116,9 +128,9 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   // Explicit dir="ltr" must be respected and not overridden by content heuristic.
   if (!blockStyle.directionDefined && hasRtlWord) {
     // Check the first few words for RTL letter codepoints (no heap allocation).
-    const size_t wordsToScan = std::min(words.size(), RTL_DETECTION_SCAN_WORDS);
+    const size_t wordsToScan = std::min(words.size(), RTL_PARAGRAPH_PROBE_WORDS);
     for (size_t i = 0; i < wordsToScan; ++i) {
-      if (BidiUtils::startsWithRtl(words[i].c_str(), BidiUtils::RTL_DETECTION_SCAN_LETTERS)) {
+      if (BidiUtils::startsWithRtl(words[i].c_str(), BidiUtils::RTL_PARAGRAPH_PROBE_DEPTH)) {
         blockStyle.isRtl = true;
         break;
       }
