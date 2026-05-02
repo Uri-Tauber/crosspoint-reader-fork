@@ -3,15 +3,15 @@
 #include <cstdint>
 
 #include "../Activity.h"
-#include "util/ButtonNavigator.h"
 
 // Classic Minesweeper for e-ink. 10x14 grid.
-// D-pad moves cursor. Confirm = reveal. Right = toggle flag. Back = exit.
+// D-pad moves cursor. Confirm short = reveal, long = toggle flag. Back = exit.
 class MinesweeperActivity final : public Activity {
-  ButtonNavigator buttonNavigator;
   static constexpr int COLS = 10;
   static constexpr int ROWS = 14;
-  static constexpr int CELL = 32;
+  static constexpr uint16_t CONTINUOUS_START_MS = 500;
+  static constexpr uint16_t CONTINUOUS_INTERVAL_MS = 500;
+  static constexpr uint16_t CONFIRM_LONG_PRESS_MS = 500;
 
   enum class CellState : uint8_t { HIDDEN, REVEALED, FLAGGED };
 
@@ -27,6 +27,12 @@ class MinesweeperActivity final : public Activity {
   bool gameOver = false;
   bool won = false;
   bool firstMove = true;  // mines placed after first reveal to avoid instant death
+  uint32_t lastUpNavTime = 0;
+  uint32_t lastDownNavTime = 0;
+  uint32_t lastLeftNavTime = 0;
+  uint32_t lastRightNavTime = 0;
+  bool confirmHeld = false;
+  bool confirmLongHandled = false;
 
   enum class Difficulty : uint8_t { EASY = 0, MEDIUM, HARD };
   Difficulty difficulty = Difficulty::EASY;
@@ -40,6 +46,10 @@ class MinesweeperActivity final : public Activity {
   int countAdjacentFlags(int row, int col) const;
   bool checkWin() const;
   const char* difficultyLabel() const;
+  bool toggleFlagAtCursor();
+  bool revealAtCursor();
+  static void drawFlagIcon(const GfxRenderer& renderer, int x, int y, int size, bool state);
+  static void drawBombIcon(const GfxRenderer& renderer, int x, int y, int size, bool state);
 
  public:
   explicit MinesweeperActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
