@@ -221,10 +221,6 @@ void MinesweeperActivity::loop() {
       onEnter();
       return;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-      difficulty = (Difficulty)(((int)difficulty - 1 + DIFFICULTY_COUNT) % DIFFICULTY_COUNT);
-      requestUpdate();
-    }
     if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
       difficulty = (Difficulty)(((int)difficulty + 1) % DIFFICULTY_COUNT);
       requestUpdate();
@@ -362,7 +358,7 @@ void MinesweeperActivity::render(RenderLock&&) {
     btn2 = tr(STR_NEW_GAME);
     btn4 = difficultyLabel();
   } else {
-    btn2 = tr(STR_MINES_REVEAL);
+    btn2 = tr(STR_TAP);
     btn3 = tr(STR_DIR_LEFT);
     btn4 = tr(STR_DIR_RIGHT);
   }
