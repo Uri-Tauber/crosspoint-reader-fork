@@ -1,5 +1,6 @@
 #include "HomeActivity.h"
 
+#include <Arduino.h>
 #include <Bitmap.h>
 #include <Epub.h>
 #include <FsHelpers.h>
@@ -114,6 +115,8 @@ void HomeActivity::onEnter() {
   hasOpdsServers = OPDS_STORE.hasServers();
 
   selectorIndex = 0;
+  backPressCount = 0;
+  lastBackPressMs = 0;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   loadRecentBooks(metrics.homeRecentBooksCount);
@@ -174,17 +177,43 @@ void HomeActivity::freeCoverBuffer() {
 void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
 
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    constexpr uint32_t BACK_PRESS_WINDOW_MS = 1500;
+    const uint32_t now = millis();
+
+    if (lastBackPressMs == 0 || now - lastBackPressMs > BACK_PRESS_WINDOW_MS) {
+      backPressCount = 0;
+    }
+
+    lastBackPressMs = now;
+    backPressCount++;
+
+    if (backPressCount >= 3) {
+      backPressCount = 0;
+      lastBackPressMs = 0;
+      onMinesweeperOpen();
+      return;
+    }
+  }
+
   buttonNavigator.onNext([this, menuCount] {
+    backPressCount = 0;
+    lastBackPressMs = 0;
     selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
     requestUpdate();
   });
 
   buttonNavigator.onPrevious([this, menuCount] {
+    backPressCount = 0;
+    lastBackPressMs = 0;
     selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
     requestUpdate();
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    backPressCount = 0;
+    lastBackPressMs = 0;
+
     // Calculate dynamic indices based on which options are available
     int idx = 0;
     int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
@@ -276,3 +305,5 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
+
+void HomeActivity::onMinesweeperOpen() { activityManager.goToMinesweeper(); }
