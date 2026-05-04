@@ -3,16 +3,6 @@
  *
  * Original author:  Ahmad Khalifa (www.arabeyes.org, MIT licence)
  * Mintty changes:   Thomas Wolff (rules N0, W7/L1/X9 fixes, isolates)
- * This port:
- *   - Removed Arabic shaping (do_shape, shapetypes) — Hebrew doesn't join
- *   - Removed box-drawing mirror table — not in epub body text
- *   - Removed explicitRTL mode — direction comes from epub HTML dir=
- *   - Removed GCC nested functions → DirStatusStack struct + static helpers
- *   - Replaced VLAs → BIDI_MAX_LINE fixed-size stack arrays
- *   - Removed dead #ifdefs (TEST_BIDI, check_emoji, CJK, debug)
- *   - Merged brackets.t + mirroring.t → single bidi_pairs.t
- *   - Dropped canonical.t (fullwidth brackets not used in Hebrew epub)
- *   - Restored Cyrillic to L in bidiclasses.t (CrossPoint supports Russian)
  *
  * UAX #9: https://www.unicode.org/reports/tr9/
  */

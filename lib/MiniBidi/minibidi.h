@@ -2,9 +2,9 @@
 #define MINIBIDI_H
 
 /*
- * minibidi.h — standalone header for ESP32C3 Hebrew/English BiDi
+ * minibidi.h — standalone header for ESP32C3 BiDi calculations
  *
- * Derived from mintty/src/minibidi.c (Thomas Wolff, MIT licence).
+ * Derived from [mintty](https://github.com/mintty/mintty/) (Thomas Wolff, MIT licence).
  * Stripped of: Arabic shaping, box-drawing mirror, terminal dependencies,
  * GCC nested functions, VLAs, and non-Hebrew/English Unicode data.
  */
