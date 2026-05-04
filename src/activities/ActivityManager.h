@@ -11,6 +11,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
@@ -123,6 +124,7 @@ class ActivityManager {
   void goToSleep();
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
+  void goToCrashReport();
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
 
   // This will move current activity to stack instead of deleting it
@@ -135,6 +137,7 @@ class ActivityManager {
   bool preventAutoSleep() const;
   bool isReaderActivity() const;
   bool skipLoopDelay() const;
+  ScreenshotInfo getScreenshotInfo() const;
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
