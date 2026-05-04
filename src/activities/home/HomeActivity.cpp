@@ -186,15 +186,6 @@ void HomeActivity::loop() {
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    // Calculate dynamic indices based on which options are available
-    int idx = 0;
-    int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    const int fileBrowserIdx = idx++;
-    const int recentsIdx = idx++;
-    const int opdsLibraryIdx = hasOpdsServers ? idx++ : -1;
-    const int fileTransferIdx = idx++;
-    const int settingsIdx = idx;
-
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
     } else {
