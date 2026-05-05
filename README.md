@@ -213,7 +213,9 @@ One of the best things about open source is that anyone can take the code in a d
 
 - [inx](https://github.com/obijuankenobiii/inx) — Completely reimagines the user interface with tabbed navigation.
 
-- ~~[PlusPoint](https://github.com/ngxson/pluspoint-reader) - custom JS apps support.~~ (Unmaintained)
+- ~~[PlusPoint](https://github.com/ngxson/pluspoint-reader) — custom JS apps support.~~ (Unmaintained)
+
+- [crosspoint-reader-papers3](https://github.com/juicecultus/crosspoint-reader-papers3) — Crosspoint port for M5Stack Paper S3. 
 
 **Note:** Many of these features will make their way into CrossPoint over time. We maintain a slower pace to ensure rock-solid stability and squash bugs before they reach your device.
 
