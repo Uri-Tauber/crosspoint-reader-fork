@@ -117,7 +117,7 @@ void HomeActivity::onEnter() {
   loadRecentBooks(metrics.homeRecentBooksCount);
 
   const auto base = static_cast<int>(recentBooks.size());
-  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + initialMenuItem.toIndex(hasOpdsServers);
+  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
 
   // Trigger first update
   requestUpdate();
@@ -190,7 +190,7 @@ void HomeActivity::loop() {
       onSelectBook(recentBooks[selectorIndex].path);
     } else {
       const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
-      switch (HomeMenuItem::fromIndex(menuIndex, hasOpdsServers).value) {
+      switch (indexToMenuItem(menuIndex, hasOpdsServers)) {
         case HomeMenuItem::FILE_BROWSER:
           onFileBrowserOpen();
           break;
