@@ -105,6 +105,53 @@ static inline void rotateCoordinates(const GfxRenderer::Orientation orientation,
   }
 }
 
+static inline void writeFrameBufferPixel(uint8_t* frameBuffer, const uint16_t panelWidthBytes, const int phyX,
+                                         const int phyY, const bool state) {
+  const uint32_t byteIndex = static_cast<uint32_t>(phyY) * panelWidthBytes + (phyX >> 3);
+  const uint8_t bitPosition = static_cast<uint8_t>(7 - (phyX & 7));
+  if (state) {
+    frameBuffer[byteIndex] &= ~(1 << bitPosition);
+  } else {
+    frameBuffer[byteIndex] |= (1 << bitPosition);
+  }
+}
+
+static inline bool extractGlyphPixelState(const uint8_t* bitmap, const int pixelPosition, const bool is2Bit,
+                                          const GfxRenderer::RenderMode renderMode, const bool pixelState,
+                                          bool* outState) {
+  if (is2Bit) {
+    const uint8_t byte = bitmap[pixelPosition >> 2];
+    const uint8_t bitIndex = static_cast<uint8_t>((3 - (pixelPosition & 3)) * 2);
+    // Font bitmap encoding maps raw values as:
+    // 0 -> white, 1 -> light gray, 2 -> dark gray, 3 -> black.
+    // Convert to renderer semantic scale:
+    // 0 -> black, 1 -> dark gray, 2 -> light gray, 3 -> white.
+    const uint8_t bmpVal = static_cast<uint8_t>(3 - ((byte >> bitIndex) & 0x3));
+
+    if (renderMode == GfxRenderer::BW && bmpVal < 3) {
+      *outState = pixelState;
+      return true;
+    }
+    if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
+      *outState = false;
+      return true;
+    }
+    if (renderMode == GfxRenderer::GRAYSCALE_LSB && bmpVal == 1) {
+      *outState = false;
+      return true;
+    }
+    return false;
+  }
+
+  const uint8_t byte = bitmap[pixelPosition >> 3];
+  const uint8_t bitIndex = static_cast<uint8_t>(7 - (pixelPosition & 7));
+  if ((byte >> bitIndex) & 1) {
+    *outState = pixelState;
+    return true;
+  }
+  return false;
+}
+
 enum class TextRotation { None, Rotated90CW };
 
 // Shared glyph rendering logic for normal and rotated text.
@@ -127,78 +174,87 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   const int top = glyph->top;
 
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
+  if (!bitmap) return;
 
-  if (bitmap != nullptr) {
-    // For Normal:  outer loop advances screenY, inner loop advances screenX
-    // For Rotated: outer loop advances screenX, inner loop advances screenY (in reverse)
-    int outerBase, innerBase;
-    if constexpr (rotation == TextRotation::Rotated90CW) {
-      outerBase = cursorX + fontData->ascender - top;  // screenX = outerBase + glyphY
-      innerBase = cursorY - left;                      // screenY = innerBase - glyphX
-    } else {
-      outerBase = cursorY - top;   // screenY = outerBase + glyphY
-      innerBase = cursorX + left;  // screenX = innerBase + glyphX
-    }
-
-    if (is2Bit) {
-      int pixelPosition = 0;
-      for (int glyphY = 0; glyphY < height; glyphY++) {
-        const int outerCoord = outerBase + glyphY;
-        for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
-          int screenX, screenY;
-          if constexpr (rotation == TextRotation::Rotated90CW) {
-            screenX = outerCoord;
-            screenY = innerBase - glyphX;
-          } else {
-            screenX = innerBase + glyphX;
-            screenY = outerCoord;
-          }
-
-          const uint8_t byte = bitmap[pixelPosition >> 2];
-          const uint8_t bit_index = (3 - (pixelPosition & 3)) * 2;
-          // the direct bit from the font is 0 -> white, 1 -> light gray, 2 -> dark gray, 3 -> black
-          // we swap this to better match the way images and screen think about colors:
-          // 0 -> black, 1 -> dark grey, 2 -> light grey, 3 -> white
-          const uint8_t bmpVal = 3 - ((byte >> bit_index) & 0x3);
-
-          if (renderMode == GfxRenderer::BW && bmpVal < 3) {
-            // Black (also paints over the grays in BW mode)
-            renderer.drawPixel(screenX, screenY, pixelState);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
-            // Light gray (also mark the MSB if it's going to be a dark gray too)
-            // Dedicated X3 gray LUTs now provide proper 4-level gray on both devices
-            // We have to flag pixels in reverse for the gray buffers, as 0 leave alone, 1 update
-            renderer.drawPixel(screenX, screenY, false);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB && bmpVal == 1) {
-            // Dark gray
-            renderer.drawPixel(screenX, screenY, false);
-          }
-        }
-      }
-    } else {
-      int pixelPosition = 0;
-      for (int glyphY = 0; glyphY < height; glyphY++) {
-        const int outerCoord = outerBase + glyphY;
-        for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
-          int screenX, screenY;
-          if constexpr (rotation == TextRotation::Rotated90CW) {
-            screenX = outerCoord;
-            screenY = innerBase - glyphX;
-          } else {
-            screenX = innerBase + glyphX;
-            screenY = outerCoord;
-          }
-
-          const uint8_t byte = bitmap[pixelPosition >> 3];
-          const uint8_t bit_index = 7 - (pixelPosition & 7);
-
-          if ((byte >> bit_index) & 1) {
-            renderer.drawPixel(screenX, screenY, pixelState);
-          }
-        }
-      }
-    }
+  // For Normal:  outer loop advances screenY, inner loop advances screenX
+  // For Rotated: outer loop advances screenX, inner loop advances screenY (in reverse)
+  int outerBase;
+  int innerBase;
+  if constexpr (rotation == TextRotation::Rotated90CW) {
+    outerBase = cursorX + fontData->ascender - top;  // screenX = outerBase + glyphY
+    innerBase = cursorY - left;                      // screenY = innerBase - glyphX
+  } else {
+    outerBase = cursorY - top;   // screenY = outerBase + glyphY
+    innerBase = cursorX + left;  // screenX = innerBase + glyphX
   }
+
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+
+  int gxStart = 0;
+  int gxEnd = static_cast<int>(width);
+  int gyStart = 0;
+  int gyEnd = static_cast<int>(height);
+
+  if constexpr (rotation == TextRotation::Rotated90CW) {
+    // screenX = outerBase + glyphY, screenY = innerBase - glyphX
+    gyStart = std::max(0, -outerBase);
+    gyEnd = std::min(static_cast<int>(height), screenW - outerBase);
+    gxStart = std::max(0, innerBase - (screenH - 1));
+    gxEnd = std::min(static_cast<int>(width), innerBase + 1);
+  } else {
+    // screenX = innerBase + glyphX, screenY = outerBase + glyphY
+    gxStart = std::max(0, -innerBase);
+    gxEnd = std::min(static_cast<int>(width), screenW - innerBase);
+    gyStart = std::max(0, -outerBase);
+    gyEnd = std::min(static_cast<int>(height), screenH - outerBase);
+  }
+
+  if (gxStart >= gxEnd || gyStart >= gyEnd) return;
+
+  uint8_t* frameBuffer = renderer.getFrameBuffer();
+  if (!frameBuffer) return;
+
+  const int panelW = renderer.getDisplayWidth();
+  const int panelH = renderer.getDisplayHeight();
+  const uint16_t stride = renderer.getDisplayWidthBytes();
+
+#define RENDERCHAR_FAST_INNER(PHYS_X_EXPR, PHYS_Y_EXPR)                                                              \
+  for (int glyphY = gyStart; glyphY < gyEnd; glyphY++) {                                                             \
+    const int outerCoord = outerBase + glyphY;                                                                       \
+    const int rowOffset = glyphY * static_cast<int>(width);                                                          \
+    for (int glyphX = gxStart; glyphX < gxEnd; glyphX++) {                                                           \
+      bool drawState = false;                                                                                        \
+      if (!extractGlyphPixelState(bitmap, rowOffset + glyphX, is2Bit, renderMode, pixelState, &drawState)) continue; \
+      int screenX;                                                                                                   \
+      int screenY;                                                                                                   \
+      if constexpr (rotation == TextRotation::Rotated90CW) {                                                         \
+        screenX = outerCoord;                                                                                        \
+        screenY = innerBase - glyphX;                                                                                \
+      } else {                                                                                                       \
+        screenX = innerBase + glyphX;                                                                                \
+        screenY = outerCoord;                                                                                        \
+      }                                                                                                              \
+      writeFrameBufferPixel(frameBuffer, stride, (PHYS_X_EXPR), (PHYS_Y_EXPR), drawState);                           \
+    }                                                                                                                \
+  }
+
+  switch (renderer.getOrientation()) {
+    case GfxRenderer::LandscapeCounterClockwise:
+      RENDERCHAR_FAST_INNER(screenX, screenY)
+      break;
+    case GfxRenderer::Portrait:
+      RENDERCHAR_FAST_INNER(screenY, panelH - 1 - screenX)
+      break;
+    case GfxRenderer::LandscapeClockwise:
+      RENDERCHAR_FAST_INNER(panelW - 1 - screenX, panelH - 1 - screenY)
+      break;
+    case GfxRenderer::PortraitInverted:
+      RENDERCHAR_FAST_INNER(panelW - 1 - screenY, screenX)
+      break;
+  }
+
+#undef RENDERCHAR_FAST_INNER
 }
 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
@@ -738,9 +794,18 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   }
   LOG_DBG("GFX", "Scaling by %f - %s", scale, isScaled ? "scaled" : "not scaled");
 
+  const int screenW = getScreenWidth();
+  const int screenH = getScreenHeight();
+  const int panelW = panelWidth;
+  const int panelH = panelHeight;
+  const uint16_t stride = panelWidthBytes;
+  const Orientation currentOrientation = orientation;
+  uint8_t* const frameBufferPtr = frameBuffer;
+  const int bmpWidth = bitmap.getWidth();
+
   // Calculate output row size (2 bits per pixel, packed into bytes)
   // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
-  const int outputRowSize = (bitmap.getWidth() + 3) / 4;
+  const int outputRowSize = (bmpWidth + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
 
@@ -759,7 +824,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       screenY = std::floor(screenY * scale);
     }
     screenY += y;  // the offset should not be scaled
-    if (screenY >= getScreenHeight()) {
+    if (screenY >= screenH) {
       break;
     }
 
@@ -779,29 +844,56 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       continue;
     }
 
-    for (int bmpX = cropPixX; bmpX < bitmap.getWidth() - cropPixX; bmpX++) {
-      int screenX = bmpX - cropPixX;
-      if (isScaled) {
-        screenX = std::floor(screenX * scale);
-      }
-      screenX += x;  // the offset should not be scaled
-      if (screenX >= getScreenWidth()) {
+#define DRAWBITMAP_FAST_ROW(PHYS_X_EXPR, PHYS_Y_EXPR)                                         \
+  for (int bmpX = cropPixX; bmpX < bmpWidth - cropPixX; bmpX++) {                             \
+    int screenX = bmpX - cropPixX;                                                            \
+    if (isScaled) {                                                                           \
+      screenX = std::floor(screenX * scale);                                                  \
+    }                                                                                         \
+    screenX += x;                                                                             \
+    if (screenX >= screenW) {                                                                 \
+      break;                                                                                  \
+    }                                                                                         \
+    if (screenX < 0) {                                                                        \
+      continue;                                                                               \
+    }                                                                                         \
+                                                                                              \
+    const uint8_t val = (outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8))) & 0x3;                \
+    bool drawState = false;                                                                   \
+    bool shouldDraw = false;                                                                  \
+                                                                                              \
+    if (renderMode == BW && val < 3) {                                                        \
+      shouldDraw = true;                                                                      \
+      drawState = true;                                                                       \
+    } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {                       \
+      shouldDraw = true;                                                                      \
+      drawState = false;                                                                      \
+    } else if (renderMode == GRAYSCALE_LSB && val == 1) {                                     \
+      shouldDraw = true;                                                                      \
+      drawState = false;                                                                      \
+    }                                                                                         \
+                                                                                              \
+    if (shouldDraw) {                                                                         \
+      writeFrameBufferPixel(frameBufferPtr, stride, (PHYS_X_EXPR), (PHYS_Y_EXPR), drawState); \
+    }                                                                                         \
+  }
+
+    switch (currentOrientation) {
+      case LandscapeCounterClockwise:
+        DRAWBITMAP_FAST_ROW(screenX, screenY)
         break;
-      }
-      if (screenX < 0) {
-        continue;
-      }
-
-      const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
-
-      if (renderMode == BW && val < 3) {
-        drawPixel(screenX, screenY);
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        drawPixel(screenX, screenY, false);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, false);
-      }
+      case Portrait:
+        DRAWBITMAP_FAST_ROW(screenY, panelH - 1 - screenX)
+        break;
+      case LandscapeClockwise:
+        DRAWBITMAP_FAST_ROW(panelW - 1 - screenX, panelH - 1 - screenY)
+        break;
+      case PortraitInverted:
+        DRAWBITMAP_FAST_ROW(panelW - 1 - screenY, screenX)
+        break;
     }
+
+#undef DRAWBITMAP_FAST_ROW
   }
 
   free(outputRow);
