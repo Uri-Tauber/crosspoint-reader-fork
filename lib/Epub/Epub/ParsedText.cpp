@@ -746,11 +746,21 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       reorderedWidthsScratch.push_back(wordWidths[lastBreakAt + src]);
       reorderedFocusSuffixScratch.push_back(wordIsFocusSuffix[lastBreakAt + src]);
 
-      // A continuation relation is tied to (src-1 -> src). Keep it only if that
-      // predecessor remains immediately before src after visual reordering.
+      // Continuation means "no break/gap between two adjacent logical tokens".
+      // After visual reordering (common in RTL), an adjacent logical pair can appear
+      // as either (prev -> curr) or (curr -> prev) in visual order; preserve both.
       bool continues = false;
-      if (src > 0 && continuesVec[lastBreakAt + src] && i > 0) {
-        continues = visualOrder[i - 1] == static_cast<uint16_t>(src - 1);
+      if (i > 0) {
+        const size_t prevSrc = visualOrder[i - 1];
+        const size_t currSrc = src;
+        const bool forwardAdjacent = currSrc == prevSrc + 1;
+        const bool reverseAdjacent = prevSrc == currSrc + 1;
+
+        if (forwardAdjacent && continuesVec[lastBreakAt + currSrc]) {
+          continues = true;
+        } else if (reverseAdjacent && continuesVec[lastBreakAt + prevSrc]) {
+          continues = true;
+        }
       }
       reorderedContinuesScratch.push_back(continues);
     }
