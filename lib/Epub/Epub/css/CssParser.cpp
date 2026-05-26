@@ -125,16 +125,20 @@ void CssParser::normalizedInto(const std::string& s, std::string& out) {
   }
 }
 
-std::vector<std::string> CssParser::splitOnChar(const std::string& s, const char delimiter) {
-  std::vector<std::string> parts;
+std::vector<std::string_view> CssParser::splitOnChar(std::string_view s, const char delimiter) {
+  std::vector<std::string_view> parts;
   size_t start = 0;
 
   for (size_t i = 0; i <= s.size(); ++i) {
     if (i == s.size() || s[i] == delimiter) {
-      std::string part = s.substr(start, i - start);
-      std::string trimmed = normalized(part);
-      if (!trimmed.empty()) {
-        parts.push_back(trimmed);
+      std::string_view part = s.substr(start, i - start);
+
+      // Trim whitespace
+      while (!part.empty() && isCssWhitespace(part.front())) part.remove_prefix(1);
+      while (!part.empty() && isCssWhitespace(part.back())) part.remove_suffix(1);
+
+      if (!part.empty()) {
+        parts.push_back(part);
       }
       start = i + 1;
     }
@@ -142,8 +146,8 @@ std::vector<std::string> CssParser::splitOnChar(const std::string& s, const char
   return parts;
 }
 
-std::vector<std::string> CssParser::splitWhitespace(const std::string& s) {
-  std::vector<std::string> parts;
+std::vector<std::string_view> CssParser::splitWhitespace(std::string_view s) {
+  std::vector<std::string_view> parts;
   size_t start = 0;
   bool inWord = false;
 
@@ -300,10 +304,10 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
   } else if (propNameBuf == "margin") {
     const auto values = splitWhitespace(propValueBuf);
     if (!values.empty()) {
-      style.marginTop = interpretLength(values[0]);
-      style.marginRight = values.size() >= 2 ? interpretLength(values[1]) : style.marginTop;
-      style.marginBottom = values.size() >= 3 ? interpretLength(values[2]) : style.marginTop;
-      style.marginLeft = values.size() >= 4 ? interpretLength(values[3]) : style.marginRight;
+      style.marginTop = interpretLength(std::string(values[0]));
+      style.marginRight = values.size() >= 2 ? interpretLength(std::string(values[1])) : style.marginTop;
+      style.marginBottom = values.size() >= 3 ? interpretLength(std::string(values[2])) : style.marginTop;
+      style.marginLeft = values.size() >= 4 ? interpretLength(std::string(values[3])) : style.marginRight;
       style.defined.marginTop = style.defined.marginRight = style.defined.marginBottom = style.defined.marginLeft = 1;
     }
   } else if (propNameBuf == "padding-top") {
@@ -321,10 +325,10 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
   } else if (propNameBuf == "padding") {
     const auto values = splitWhitespace(propValueBuf);
     if (!values.empty()) {
-      style.paddingTop = interpretLength(values[0]);
-      style.paddingRight = values.size() >= 2 ? interpretLength(values[1]) : style.paddingTop;
-      style.paddingBottom = values.size() >= 3 ? interpretLength(values[2]) : style.paddingTop;
-      style.paddingLeft = values.size() >= 4 ? interpretLength(values[3]) : style.paddingRight;
+      style.paddingTop = interpretLength(std::string(values[0]));
+      style.paddingRight = values.size() >= 2 ? interpretLength(std::string(values[1])) : style.paddingTop;
+      style.paddingBottom = values.size() >= 3 ? interpretLength(std::string(values[2])) : style.paddingTop;
+      style.paddingLeft = values.size() >= 4 ? interpretLength(std::string(values[3])) : style.paddingRight;
       style.defined.paddingTop = style.defined.paddingRight = style.defined.paddingBottom = style.defined.paddingLeft =
           1;
     }
@@ -389,7 +393,7 @@ void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, cons
     }
 
     // Normalize the selector
-    std::string key = normalized(sel);
+    std::string key = normalized(std::string(sel));
     if (key.empty()) continue;
 
     // TODO: Consider adding support for sibling css selectors in the future
@@ -633,7 +637,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     const auto classes = splitWhitespace(classAttr);
 
     for (const auto& cls : classes) {
-      std::string classKey = "." + normalized(cls);
+      std::string classKey = "." + normalized(std::string(cls));
 
       auto classIt = rulesBySelector_.find(classKey);
       if (classIt != rulesBySelector_.end()) {
@@ -644,7 +648,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     // TODO: Support combinations of classes (e.g. style on p.class1.class2)
     // 3. Apply element.class styles (higher priority)
     for (const auto& cls : classes) {
-      std::string combinedKey = tag + "." + normalized(cls);
+      std::string combinedKey = tag + "." + normalized(std::string(cls));
 
       auto combinedIt = rulesBySelector_.find(combinedKey);
       if (combinedIt != rulesBySelector_.end()) {

@@ -323,22 +323,22 @@ XtcError XtcParser::readChapters() {
   }
 
   m_chapters.reserve(chapterCount);
-  std::vector<uint8_t> chapterBuf(chapterSize);
+  uint8_t chapterBuf[chapterSize];
   for (size_t i = 0; i < chapterCount; i++) {
-    if (m_file.read(chapterBuf.data(), chapterSize) != chapterSize) {
+    if (m_file.read(chapterBuf, chapterSize) != chapterSize) {
       return XtcError::READ_ERROR;
     }
 
     char nameBuf[81];
-    memcpy(nameBuf, chapterBuf.data(), 80);
+    memcpy(nameBuf, chapterBuf, 80);
     nameBuf[80] = '\0';
     const size_t nameLen = strnlen(nameBuf, 80);
     std::string name(nameBuf, nameLen);
 
     uint16_t startPage = 0;
     uint16_t endPage = 0;
-    memcpy(&startPage, chapterBuf.data() + 0x50, sizeof(startPage));
-    memcpy(&endPage, chapterBuf.data() + 0x52, sizeof(endPage));
+    memcpy(&startPage, chapterBuf + 0x50, sizeof(startPage));
+    memcpy(&endPage, chapterBuf + 0x52, sizeof(endPage));
 
     if (name.empty() && startPage == 0 && endPage == 0) {
       break;

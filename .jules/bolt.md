@@ -1,0 +1,1 @@
+Implemented heap allocation improvements: used Stack Buffers Optimization (SBO) for row buffers in GfxRenderer, an SBO for nodeX scanline buffer in GfxRenderer, a stack array in XtcParser instead of a std::vector, and string_view in CssParser to avoid huge amounts of short-lived allocations.
