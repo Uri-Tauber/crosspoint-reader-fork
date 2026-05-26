@@ -326,8 +326,8 @@ void EpubReaderActivity::loop() {
 
   if (longPress && SETTINGS.longPressButtonBehavior == SETTINGS.ORIENTATION_CHANGE) {
     const uint8_t newOrientation =
-        nextTriggered ? (SETTINGS.orientation - 1 + SETTINGS.ORIENTATION_COUNT) % SETTINGS.ORIENTATION_COUNT
-                      : (SETTINGS.orientation + 1) % SETTINGS.ORIENTATION_COUNT;
+        nextTriggered ? (SETTINGS.orientation - 1 + CrossPointOrientation::COUNT) % CrossPointOrientation::COUNT
+                      : (SETTINGS.orientation + 1) % CrossPointOrientation::COUNT;
     applyOrientation(newOrientation);
     requestUpdate();
     return;

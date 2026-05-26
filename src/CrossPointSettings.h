@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <iosfwd>
 
+#include "CrossPointTypes.h"
+
 class CrossPointSettings {
  private:
   // Private constructor for singleton
@@ -63,14 +65,6 @@ class CrossPointSettings {
     XTC_STATUS_BAR_BOTTOM = 1,
     XTC_STATUS_BAR_TOP = 2,
     XTC_STATUS_BAR_MODE_COUNT
-  };
-
-  enum ORIENTATION {
-    PORTRAIT = 0,       // 480x800 logical coordinates (current default)
-    LANDSCAPE_CW = 1,   // 800x480 logical coordinates, rotated 180° (swap top/bottom)
-    INVERTED = 2,       // 480x800 logical coordinates, inverted
-    LANDSCAPE_CCW = 3,  // 800x480 logical coordinates, native panel orientation
-    ORIENTATION_COUNT
   };
 
   // Front button layout options (legacy)
@@ -153,8 +147,6 @@ class CrossPointSettings {
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
 
-  enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
-
   enum QUICK_RESUME_SLEEP_SCREEN {
     QUICK_RESUME_NEVER = 0,
     QUICK_RESUME_AFTER_TIMEOUT = 1,
@@ -194,7 +186,7 @@ class CrossPointSettings {
   uint8_t shortPwrBtn = IGNORE;
   // EPUB reading orientation settings
   // 0 = portrait (default), 1 = landscape clockwise, 2 = inverted, 3 = landscape counter-clockwise
-  uint8_t orientation = PORTRAIT;
+  uint8_t orientation = CrossPointOrientation::PORTRAIT;
   // Button layouts (front layout retained for migration only)
   uint8_t frontButtonLayout = BACK_CONFIRM_LEFT_RIGHT;
   uint8_t sideButtonLayout = PREV_NEXT;
@@ -245,7 +237,7 @@ class CrossPointSettings {
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Tilt-based page turning (X3 only — requires QMI8658 IMU)
-  uint8_t tiltPageTurn = TILT_OFF;
+  uint8_t tiltPageTurn = CrossPointTiltPageTurn::TILT_OFF;
   // Language setting (Language enum index, default 0 = EN)
   uint8_t language = 0;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.

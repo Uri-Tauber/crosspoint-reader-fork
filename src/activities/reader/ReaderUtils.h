@@ -14,16 +14,16 @@ constexpr unsigned long SKIP_HOLD_MS = 700;
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   switch (orientation) {
-    case CrossPointSettings::ORIENTATION::PORTRAIT:
+    case CrossPointOrientation::PORTRAIT:
       renderer.setOrientation(GfxRenderer::Orientation::Portrait);
       break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CW:
+    case CrossPointOrientation::LANDSCAPE_CW:
       renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
       break;
-    case CrossPointSettings::ORIENTATION::INVERTED:
+    case CrossPointOrientation::INVERTED:
       renderer.setOrientation(GfxRenderer::Orientation::PortraitInverted);
       break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CCW:
+    case CrossPointOrientation::LANDSCAPE_CCW:
       renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
       break;
     default:
@@ -42,8 +42,8 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   const bool tiltNext = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedForward();
   const bool tiltPrev = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedBack();
   const bool swapFront =
-      SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
-                                                SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
+      SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointOrientation::INVERTED ||
+                                                SETTINGS.orientation == CrossPointOrientation::LANDSCAPE_CCW);
   const auto prevButton = swapFront ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
   const auto nextButton = swapFront ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
   const bool prev =
