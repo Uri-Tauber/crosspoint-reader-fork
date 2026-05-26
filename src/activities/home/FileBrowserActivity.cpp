@@ -324,19 +324,19 @@ void FileBrowserActivity::loop() {
   });
 }
 
-std::string getFileName(std::string filename) {
+std::string getFileName(const std::string& filename) {
   if (filename.back() == '/') {
-    filename.pop_back();
+    std::string name = filename.substr(0, filename.length() - 1);
     if (!UITheme::getInstance().getTheme().showsFileIcons()) {
-      return "[" + filename + "]";
+      return "[" + name + "]";
     }
-    return filename;
+    return name;
   }
   const auto pos = filename.rfind('.');
   return filename.substr(0, pos);
 }
 
-std::string getFileExtension(std::string filename) {
+std::string getFileExtension(const std::string& filename) {
   if (filename.back() == '/') {
     return "";
   }
