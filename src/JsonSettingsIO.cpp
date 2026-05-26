@@ -15,6 +15,21 @@
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
 
+namespace {
+// Helper to extract a string without incurring temporary std::string allocation
+// when using the ArduinoJson fallback `| std::string("")` syntax.
+inline std::string getString(const JsonVariantConst& var, const char* defaultVal = "") {
+  const char* val = var.as<const char*>();
+  return val ? std::string(val) : std::string(defaultVal);
+}
+
+// Helper to extract a const char* without incurring temporary std::string allocation
+inline const char* getCString(const JsonVariantConst& var, const char* defaultVal = "") {
+  const char* val = var.as<const char*>();
+  return val ? val : defaultVal;
+}
+}  // namespace
+
 // Convert legacy settings.
 void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
   switch (static_cast<CrossPointSettings::STATUS_BAR_MODE>(settings.statusBar)) {
@@ -90,7 +105,7 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
     return false;
   }
 
-  s.openEpubPath = doc["openEpubPath"] | std::string("");
+  s.openEpubPath = getString(doc["openEpubPath"]);
   memset(s.recentSleepImages, 0, sizeof(s.recentSleepImages));
   JsonArrayConst recentArr = doc["recentSleepImages"];
   const int actualCount = recentArr.isNull() ? 0
@@ -279,18 +294,18 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
     return false;
   }
 
-  store.lastConnectedSsid = doc["lastConnectedSsid"] | std::string("");
+  store.lastConnectedSsid = getString(doc["lastConnectedSsid"]);
 
   store.credentials.clear();
   JsonArray arr = doc["credentials"].as<JsonArray>();
   for (JsonObject obj : arr) {
     if (store.credentials.size() >= store.MAX_NETWORKS) break;
     WifiCredential cred;
-    cred.ssid = obj["ssid"] | std::string("");
+    cred.ssid = getString(obj["ssid"]);
     bool ok = false;
-    cred.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
+    cred.password = obfuscation::deobfuscateFromBase64(getCString(obj["password_obf"]), &ok);
     if (!ok || cred.password.empty()) {
-      cred.password = obj["password"] | std::string("");
+      cred.password = getString(obj["password"]);
       if (!cred.password.empty() && needsResave) *needsResave = true;
     }
     store.credentials.push_back(cred);
@@ -331,10 +346,10 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
   for (JsonObject obj : arr) {
     if (store.getCount() >= 10) break;
     RecentBook book;
-    book.path = obj["path"] | std::string("");
-    book.title = obj["title"] | std::string("");
-    book.author = obj["author"] | std::string("");
-    book.coverBmpPath = obj["coverBmpPath"] | std::string("");
+    book.path = getString(obj["path"]);
+    book.title = getString(obj["title"]);
+    book.author = getString(obj["author"]);
+    book.coverBmpPath = getString(obj["coverBmpPath"]);
     store.recentBooks.push_back(book);
   }
 
@@ -377,15 +392,15 @@ bool JsonSettingsIO::loadOpds(OpdsServerStore& store, const char* json, bool* ne
   for (JsonObject obj : arr) {
     if (store.servers.size() >= OpdsServerStore::MAX_SERVERS) break;
     OpdsServer server;
-    server.name = obj["name"] | std::string("");
-    server.url = obj["url"] | std::string("");
-    server.username = obj["username"] | std::string("");
+    server.name = getString(obj["name"]);
+    server.url = getString(obj["url"]);
+    server.username = getString(obj["username"]);
     // Try the obfuscated key first; fall back to plaintext "password" for
     // files written before obfuscation was added (or hand-edited JSON).
     bool ok = false;
-    server.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
+    server.password = obfuscation::deobfuscateFromBase64(getCString(obj["password_obf"]), &ok);
     if (!ok || server.password.empty()) {
-      server.password = obj["password"] | std::string("");
+      server.password = getString(obj["password"]);
       if (!server.password.empty() && needsResave) *needsResave = true;
     }
     store.servers.push_back(std::move(server));

@@ -1,0 +1,1 @@
+Bolt learning: In C++ using ArduinoJson, avoid the fallback idiom `doc["key"] | std::string("")`, as it forces a temporary string allocation on every evaluation even when the key exists. Instead, use a helper extracting via `.as<const char*>()` and falling back gracefully if null. This is especially important in hot paths or loops on constrained devices.
