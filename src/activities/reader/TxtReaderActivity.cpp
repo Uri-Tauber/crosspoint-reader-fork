@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <Serialization.h>
 #include <Utf8.h>
 
@@ -180,14 +181,13 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
 
   // Read a chunk from file
   size_t chunkSize = std::min(CHUNK_SIZE, fileSize - offset);
-  auto* buffer = static_cast<uint8_t*>(malloc(chunkSize + 1));
+  auto buffer = makeUniqueNoThrow<uint8_t[]>(chunkSize + 1);
   if (!buffer) {
     LOG_ERR("TRS", "Failed to allocate %zu bytes", chunkSize);
     return false;
   }
 
-  if (!txt->readContent(buffer, offset, chunkSize)) {
-    free(buffer);
+  if (!txt->readContent(buffer.get(), offset, chunkSize)) {
     return false;
   }
   buffer[chunkSize] = '\0';
@@ -200,7 +200,7 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
   // corrupts FreeRTOS state. The advance table persists across calls per
   // font, so the cost amortizes to ~ASCII-size after the first chunk.
   if (renderer.isSdCardFont(cachedFontId)) {
-    renderer.ensureSdCardFontReady(cachedFontId, reinterpret_cast<const char*>(buffer), /*styleMask=*/0x01);
+    renderer.ensureSdCardFontReady(cachedFontId, reinterpret_cast<const char*>(buffer.get()), /*styleMask=*/0x01);
   }
 
   // Parse lines from buffer
@@ -229,7 +229,7 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     size_t displayLen = hasCR ? lineContentLen - 1 : lineContentLen;
 
     // Extract line content for display (without CR/LF)
-    std::string line(reinterpret_cast<char*>(buffer + pos), displayLen);
+    std::string line(reinterpret_cast<char*>(buffer.get() + pos), displayLen);
 
     // Track position within this source line (in bytes from pos)
     size_t lineBytePos = 0;
@@ -308,8 +308,6 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
   if (nextOffset > fileSize) {
     nextOffset = fileSize;
   }
-
-  free(buffer);
 
   return !outLines.empty();
 }
