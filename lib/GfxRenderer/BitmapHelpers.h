@@ -24,10 +24,11 @@ void createBmpHeader(BmpHeader* bmpHeader, int width, int height, BmpRowOrder ro
 //     1/8
 class Atkinson1BitDitherer {
  public:
-  explicit Atkinson1BitDitherer(int width) : width(width) {
-    errorRow0 = std::make_unique<int16_t[]>(width + 4);
-    errorRow1 = std::make_unique<int16_t[]>(width + 4);
-    errorRow2 = std::make_unique<int16_t[]>(width + 4);
+  explicit Atkinson1BitDitherer(int width)
+      : width(width),
+        errorRow0(std::make_unique<int16_t[]>(width + 4)),
+        errorRow1(std::make_unique<int16_t[]>(width + 4)),
+        errorRow2(std::make_unique<int16_t[]>(width + 4)) {
     std::fill(errorRow0.get(), errorRow0.get() + (width + 4), int16_t(0));
     std::fill(errorRow1.get(), errorRow1.get() + (width + 4), int16_t(0));
     std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
@@ -102,10 +103,11 @@ class Atkinson1BitDitherer {
 // Less error buildup = fewer artifacts than Floyd-Steinberg
 class AtkinsonDitherer {
  public:
-  explicit AtkinsonDitherer(int width) : width(width) {
-    errorRow0 = std::make_unique<int16_t[]>(width + 4);
-    errorRow1 = std::make_unique<int16_t[]>(width + 4);
-    errorRow2 = std::make_unique<int16_t[]>(width + 4);
+  explicit AtkinsonDitherer(int width)
+      : width(width),
+        errorRow0(std::make_unique<int16_t[]>(width + 4)),
+        errorRow1(std::make_unique<int16_t[]>(width + 4)),
+        errorRow2(std::make_unique<int16_t[]>(width + 4)) {
     std::fill(errorRow0.get(), errorRow0.get() + (width + 4), int16_t(0));
     std::fill(errorRow1.get(), errorRow1.get() + (width + 4), int16_t(0));
     std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
@@ -201,9 +203,11 @@ class AtkinsonDitherer {
 //      7/16  X
 class FloydSteinbergDitherer {
  public:
-  explicit FloydSteinbergDitherer(int width) : width(width), rowCount(0) {
-    errorCurRow = std::make_unique<int16_t[]>(width + 2);
-    errorNextRow = std::make_unique<int16_t[]>(width + 2);
+  explicit FloydSteinbergDitherer(int width)
+      : width(width),
+        rowCount(0),
+        errorCurRow(std::make_unique<int16_t[]>(width + 2)),
+        errorNextRow(std::make_unique<int16_t[]>(width + 2)) {
     std::fill(errorCurRow.get(), errorCurRow.get() + (width + 2), int16_t(0));
     std::fill(errorNextRow.get(), errorNextRow.get() + (width + 2), int16_t(0));
   }
