@@ -97,7 +97,7 @@ bool RecentBooksStore::saveToFile() const {
   return JsonSettingsIO::saveRecentBooks(*this, RECENT_BOOKS_FILE_JSON);
 }
 
-RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
+RecentBook RecentBooksStore::getDataFromBook(const std::string& path) const {
   std::string lastBookFileName = "";
   const size_t lastSlash = path.find_last_of('/');
   if (lastSlash != std::string::npos) {

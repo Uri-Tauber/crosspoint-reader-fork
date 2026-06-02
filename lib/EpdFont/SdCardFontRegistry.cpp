@@ -115,7 +115,8 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     }
 
     SdCardFontFileInfo info;
-    info.path = std::string(dirPath) + "/" + nameBuffer;
+    info.path = dirPath;
+    info.path.append("/").append(nameBuffer);
     info.pointSize = size;
     info.style = style;
     family.files.push_back(std::move(info));
@@ -159,7 +160,8 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
 
       SdCardFontFamilyInfo family;
       family.name = nameBuffer;
-      std::string subDirPath = std::string(rootPath) + "/" + nameBuffer;
+      std::string subDirPath(rootPath);
+      subDirPath.append("/").append(nameBuffer);
       SdCardFontRegistry::scanDirectory(subDirPath.c_str(), family);
 
       if (!family.files.empty()) {

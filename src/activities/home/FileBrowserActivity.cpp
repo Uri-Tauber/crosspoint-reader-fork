@@ -44,7 +44,7 @@ void FileBrowserActivity::loadFiles() {
     }
 
     if (file.isDirectory()) {
-      files.emplace_back(std::string(fileNameBuffer.get()) + "/");
+      files.emplace_back(fileNameBuffer.get()).push_back('/');
     } else {
       std::string_view filename{fileNameBuffer.get()};
       if (mode == Mode::PickFirmware) {
@@ -255,7 +255,8 @@ void FileBrowserActivity::loop() {
         }
       };
 
-      std::string heading = tr(STR_DELETE) + std::string("? ");
+      std::string heading(tr(STR_DELETE));
+      heading.append("? ");
 
       startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, entry), handler);
       return;
@@ -324,19 +325,21 @@ void FileBrowserActivity::loop() {
   });
 }
 
-std::string getFileName(std::string filename) {
+std::string getFileName(const std::string& filename) {
   if (filename.back() == '/') {
-    filename.pop_back();
+    std::string name = filename.substr(0, filename.length() - 1);
     if (!UITheme::getInstance().getTheme().showsFileIcons()) {
-      return "[" + filename + "]";
+      std::string bracketed("[");
+      bracketed.append(name).append("]");
+      return bracketed;
     }
-    return filename;
+    return name;
   }
   const auto pos = filename.rfind('.');
   return filename.substr(0, pos);
 }
 
-std::string getFileExtension(std::string filename) {
+std::string getFileExtension(const std::string& filename) {
   if (filename.back() == '/') {
     return "";
   }

@@ -73,7 +73,8 @@ std::string Txt::findCoverImage() const {
 
   // First priority: look for image with same name as txt file (e.g., mybook.jpg)
   for (const auto& ext : extensions) {
-    std::string coverPath = folder + "/" + baseName + ext;
+    std::string coverPath(folder);
+    coverPath.append("/").append(baseName).append(ext);
     if (Storage.exists(coverPath.c_str())) {
       LOG_DBG("TXT", "Found matching cover image: %s", coverPath.c_str());
       return coverPath;
@@ -84,7 +85,8 @@ std::string Txt::findCoverImage() const {
   const char* coverNames[] = {"cover", "Cover", "COVER"};
   for (const auto& name : coverNames) {
     for (const auto& ext : extensions) {
-      std::string coverPath = folder + "/" + std::string(name) + ext;
+      std::string coverPath(folder);
+      coverPath.append("/").append(name).append(ext);
       if (Storage.exists(coverPath.c_str())) {
         LOG_DBG("TXT", "Found fallback cover image: %s", coverPath.c_str());
         return coverPath;

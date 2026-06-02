@@ -544,8 +544,11 @@ void WifiSelectionActivity::renderNetworkList(const Rect* screen, const ThemeMet
         selectedNetworkIndex, [this](int index) { return networks[index].ssid; }, nullptr, nullptr,
         [this](int index) {
           auto network = networks[index];
-          return std::string(network.hasSavedPassword ? "+ " : "") + (network.isEncrypted ? "* " : "") +
-                 getSignalStrengthIndicator(network.rssi);
+          std::string indicator;
+          if (network.hasSavedPassword) indicator.append("+ ");
+          if (network.isEncrypted) indicator.append("* ");
+          indicator.append(getSignalStrengthIndicator(network.rssi));
+          return indicator;
         });
   }
 
@@ -621,7 +624,8 @@ void WifiSelectionActivity::renderSavePrompt(const Rect* screen, const ThemeMetr
 
   // Draw "Yes" button
   if (savePromptSelection == 0) {
-    std::string text = "[" + std::string(tr(STR_YES)) + "]";
+    std::string text("[");
+    text.append(tr(STR_YES)).append("]");
     renderer.drawText(UI_10_FONT_ID, startX, buttonY, text.c_str());
   } else {
     renderer.drawText(UI_10_FONT_ID, startX + 4, buttonY, tr(STR_YES));
@@ -629,7 +633,8 @@ void WifiSelectionActivity::renderSavePrompt(const Rect* screen, const ThemeMetr
 
   // Draw "No" button
   if (savePromptSelection == 1) {
-    std::string text = "[" + std::string(tr(STR_NO)) + "]";
+    std::string text("[");
+    text.append(tr(STR_NO)).append("]");
     renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing, buttonY, text.c_str());
   } else {
     renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing + 4, buttonY, tr(STR_NO));
@@ -677,7 +682,8 @@ void WifiSelectionActivity::renderForgetPrompt(const Rect* screen, const ThemeMe
 
   // Draw "Cancel" button
   if (forgetPromptSelection == 0) {
-    std::string text = "[" + std::string(tr(STR_CANCEL)) + "]";
+    std::string text("[");
+    text.append(tr(STR_CANCEL)).append("]");
     renderer.drawText(UI_10_FONT_ID, startX, buttonY, text.c_str());
   } else {
     renderer.drawText(UI_10_FONT_ID, startX + 4, buttonY, tr(STR_CANCEL));
@@ -685,7 +691,8 @@ void WifiSelectionActivity::renderForgetPrompt(const Rect* screen, const ThemeMe
 
   // Draw "Forget network" button
   if (forgetPromptSelection == 1) {
-    std::string text = "[" + std::string(tr(STR_FORGET_BUTTON)) + "]";
+    std::string text("[");
+    text.append(tr(STR_FORGET_BUTTON)).append("]");
     renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing, buttonY, text.c_str());
   } else {
     renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing + 4, buttonY, tr(STR_FORGET_BUTTON));

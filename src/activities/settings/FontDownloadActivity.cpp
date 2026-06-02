@@ -593,8 +593,10 @@ void FontDownloadActivity::render(RenderLock&&) {
   } else if (state_ == DOWNLOADING) {
     const auto& family = families_[downloadingFamilyIndex_];
 
-    std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + family.name + " (" +
-                             std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
+    std::string statusText(tr(STR_DOWNLOADING));
+    statusText.append(" ").append(family.name).append(" (");
+    statusText.append(std::to_string(currentFileIndex_ + 1)).append("/");
+    statusText.append(std::to_string(currentFileTotal_)).append(")");
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, statusText.c_str());
 
     float progress = 0;

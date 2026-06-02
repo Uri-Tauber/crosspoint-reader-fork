@@ -70,7 +70,8 @@ std::string buildReadFolderDestination(const std::string& srcPath) {
   const std::string filename = (lastSlash != std::string::npos) ? srcPath.substr(lastSlash + 1) : srcPath;
 
   Storage.mkdir(READ_FOLDER);
-  std::string dstPath = std::string(READ_FOLDER) + "/" + filename;
+  std::string dstPath(READ_FOLDER);
+  dstPath.append("/").append(filename);
   if (!Storage.exists(dstPath.c_str())) {
     return dstPath;
   }
@@ -80,7 +81,8 @@ std::string buildReadFolderDestination(const std::string& srcPath) {
   const std::string ext = (dotPos != std::string::npos) ? filename.substr(dotPos) : "";
   int suffix = 2;
   do {
-    dstPath = std::string(READ_FOLDER) + "/" + base + " (" + std::to_string(suffix) + ")" + ext;
+    dstPath = READ_FOLDER;
+    dstPath.append("/").append(base).append(" (").append(std::to_string(suffix)).append(")").append(ext);
     suffix++;
   } while (Storage.exists(dstPath.c_str()) && suffix < 100);
   return dstPath;

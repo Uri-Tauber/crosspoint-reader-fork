@@ -49,9 +49,10 @@ void ClearCacheActivity::render(RenderLock&&) {
 
   if (state == SUCCESS) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 20, tr(STR_CACHE_CLEARED), true, EpdFontFamily::BOLD);
-    std::string resultText = std::to_string(clearedCount) + " " + std::string(tr(STR_ITEMS_REMOVED));
+    std::string resultText = std::to_string(clearedCount);
+    resultText.append(" ").append(tr(STR_ITEMS_REMOVED));
     if (failedCount > 0) {
-      resultText += ", " + std::to_string(failedCount) + " " + std::string(tr(STR_FAILED_LOWER));
+      resultText.append(", ").append(std::to_string(failedCount)).append(" ").append(tr(STR_FAILED_LOWER));
     }
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 10, resultText.c_str());
 

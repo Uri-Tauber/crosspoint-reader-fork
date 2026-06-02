@@ -64,7 +64,7 @@ class RecentBooksStore {
   bool saveToFile() const;
 
   bool loadFromFile();
-  RecentBook getDataFromBook(std::string path) const;
+  RecentBook getDataFromBook(const std::string& path) const;
 
  private:
   bool loadFromBinaryFile();

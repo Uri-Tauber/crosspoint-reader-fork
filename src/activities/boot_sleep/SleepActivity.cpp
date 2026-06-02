@@ -128,7 +128,8 @@ void SleepActivity::renderCustomSleepScreen() const {
       }
       APP_STATE.pushRecentSleep(randomFileIndex);
       APP_STATE.saveToFile();
-      const auto filename = std::string(sleepDir) + "/" + files[randomFileIndex];
+      std::string filename(sleepDir);
+      filename.append("/").append(files[randomFileIndex]);
       HalFile randFile;
       if (Storage.openFileForRead("SLP", filename, randFile)) {
         LOG_DBG("SLP", "Randomly loading: %s/%s", sleepDir, files[randomFileIndex].c_str());

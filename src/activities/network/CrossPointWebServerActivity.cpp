@@ -410,7 +410,8 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     startY += height10 + metrics.verticalSpacing * 2;
 
     // Show QR code for Wifi
-    const std::string wifiConfig = std::string("WIFI:S:") + connectedSSID + ";;";
+    std::string wifiConfig("WIFI:S:");
+    wifiConfig.append(connectedSSID).append(";;");
     const Rect qrBoundsWifi(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsWifi, wifiConfig);
 
@@ -425,8 +426,10 @@ void CrossPointWebServerActivity::renderServerRunning() const {
                       EpdFontFamily::BOLD);
     startY += height10 + metrics.verticalSpacing * 2;
 
-    std::string hostnameUrl = std::string("http://") + AP_HOSTNAME + ".local/";
-    std::string ipUrl = tr(STR_OR_HTTP_PREFIX) + connectedIP + "/";
+    std::string hostnameUrl("http://");
+    hostnameUrl.append(AP_HOSTNAME).append(".local/");
+    std::string ipUrl(tr(STR_OR_HTTP_PREFIX));
+    ipUrl.append(connectedIP).append("/");
 
     // Show QR code for URL
     const Rect qrBoundsUrl(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
@@ -448,7 +451,8 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     startY += height10 + metrics.verticalSpacing * 2;
 
     // Show QR code for URL
-    std::string webInfo = "http://" + connectedIP + "/";
+    std::string webInfo("http://");
+    webInfo.append(connectedIP).append("/");
     const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBounds, webInfo);
     startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
