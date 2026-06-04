@@ -108,13 +108,14 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
   // Keep the book in recents (crossink behavior): repoint the entry to its new
   // location instead of dropping it. updatePath persists on success.
   RECENT_BOOKS.updatePath(srcPath, dstPath, oldCachePath, newCachePath);
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
   bool needSave = false;
-  if (APP_STATE.openEpubPath == srcPath) {
-    APP_STATE.openEpubPath = dstPath;
-    needSave = true;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    if (APP_STATE.openEpubPath == srcPath) {
+      APP_STATE.openEpubPath = dstPath;
+      needSave = true;
+    }
   }
-  ;
   if (needSave) {
     APP_STATE.saveToFile();
   }
@@ -167,9 +168,10 @@ void EpubReaderActivity::onEnter() {
   }
 
   // Save current epub as last opened epub and add to recent books
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  APP_STATE.openEpubPath = epub->getPath();
-  ;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    APP_STATE.openEpubPath = epub->getPath();
+  }
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
 
@@ -183,9 +185,10 @@ void EpubReaderActivity::onExit() {
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  APP_STATE.readerActivityLoadCount = 0;
-  ;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    APP_STATE.readerActivityLoadCount = 0;
+  }
   APP_STATE.saveToFile();
   section.reset();
   if (pendingReadFolderMove && epub) {

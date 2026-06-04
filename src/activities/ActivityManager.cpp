@@ -22,11 +22,11 @@ portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
 void ActivityManager::begin() {
   xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
-                          8192,              // Stack size
-                          this,              // Parameters
-                          1,                 // Priority
-                          &renderTaskHandle, // Task handle
-                          0                  // Pin to core 0 (PRO_CPU_NUM)
+                          8192,               // Stack size
+                          this,               // Parameters
+                          1,                  // Priority
+                          &renderTaskHandle,  // Task handle
+                          0                   // Pin to core 0 (PRO_CPU_NUM)
   );
   assert(renderTaskHandle != nullptr && "Failed to create render task");
 }

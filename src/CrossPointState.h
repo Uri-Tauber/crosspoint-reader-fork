@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
-#include <string>
 #include <mutex>
+#include <string>
 
 class CrossPointState {
   mutable std::mutex _mutex;

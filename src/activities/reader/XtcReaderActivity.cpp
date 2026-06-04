@@ -36,9 +36,10 @@ void XtcReaderActivity::onEnter() {
   loadProgress();
 
   // Save current XTC as last opened book and add to recent books
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  APP_STATE.openEpubPath = xtc->getPath();
-  ;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    APP_STATE.openEpubPath = xtc->getPath();
+  }
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
 
@@ -49,9 +50,10 @@ void XtcReaderActivity::onEnter() {
 void XtcReaderActivity::onExit() {
   Activity::onExit();
 
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  APP_STATE.readerActivityLoadCount = 0;
-  ;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    APP_STATE.readerActivityLoadCount = 0;
+  }
   APP_STATE.saveToFile();
   xtc.reset();
 }

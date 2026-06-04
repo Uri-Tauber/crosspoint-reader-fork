@@ -95,10 +95,75 @@ uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue)
   }
 }
 
-bool CrossPointSettings::saveToFile() const {
-  std::lock_guard<std::mutex> lock(_mutex);
+bool CrossPointSettings::saveToFileLocked() const {
+  CrossPointSettings copy;
+  copy.copyFrom(*this);
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
+  return JsonSettingsIO::saveSettings(copy, SETTINGS_FILE_JSON);
+}
+
+bool CrossPointSettings::saveToFile() const {
+  CrossPointSettings copy;
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    copy.copyFrom(*this);
+  }
+  Storage.mkdir("/.crosspoint");
+  return JsonSettingsIO::saveSettings(copy, SETTINGS_FILE_JSON);
+}
+
+void CrossPointSettings::copyFrom(const CrossPointSettings& other) {
+  sleepScreen = other.sleepScreen;
+  sleepScreenCoverMode = other.sleepScreenCoverMode;
+  sleepScreenCoverFilter = other.sleepScreenCoverFilter;
+  statusBar = other.statusBar;
+  statusBarChapterPageCount = other.statusBarChapterPageCount;
+  statusBarBookProgressPercentage = other.statusBarBookProgressPercentage;
+  statusBarProgressBar = other.statusBarProgressBar;
+  statusBarProgressBarThickness = other.statusBarProgressBarThickness;
+  statusBarTitle = other.statusBarTitle;
+  statusBarBattery = other.statusBarBattery;
+  xtcStatusBarMode = other.xtcStatusBarMode;
+  statusBarClock = other.statusBarClock;
+  clockUtcOffsetQ = other.clockUtcOffsetQ;
+  clockFormat = other.clockFormat;
+  clockHasBeenSynced = other.clockHasBeenSynced;
+  extraParagraphSpacing = other.extraParagraphSpacing;
+  textAntiAliasing = other.textAntiAliasing;
+  shortPwrBtn = other.shortPwrBtn;
+  orientation = other.orientation;
+  frontButtonLayout = other.frontButtonLayout;
+  sideButtonLayout = other.sideButtonLayout;
+  frontButtonFollowOrientation = other.frontButtonFollowOrientation;
+  frontButtonBack = other.frontButtonBack;
+  frontButtonConfirm = other.frontButtonConfirm;
+  frontButtonLeft = other.frontButtonLeft;
+  frontButtonRight = other.frontButtonRight;
+  fontFamily = other.fontFamily;
+  fontSize = other.fontSize;
+  lineSpacing = other.lineSpacing;
+  paragraphAlignment = other.paragraphAlignment;
+  sleepTimeoutMinutes = other.sleepTimeoutMinutes;
+  refreshFrequency = other.refreshFrequency;
+  hyphenationEnabled = other.hyphenationEnabled;
+  screenMargin = other.screenMargin;
+  memcpy(opdsServerUrl, other.opdsServerUrl, sizeof(opdsServerUrl));
+  memcpy(opdsUsername, other.opdsUsername, sizeof(opdsUsername));
+  memcpy(opdsPassword, other.opdsPassword, sizeof(opdsPassword));
+  hideBatteryPercentage = other.hideBatteryPercentage;
+  longPressButtonBehavior = other.longPressButtonBehavior;
+  uiTheme = other.uiTheme;
+  fadingFix = other.fadingFix;
+  embeddedStyle = other.embeddedStyle;
+  focusReadingEnabled = other.focusReadingEnabled;
+  memcpy(sdFontFamilyName, other.sdFontFamilyName, sizeof(sdFontFamilyName));
+  showHiddenFiles = other.showHiddenFiles;
+  removeReadBooksFromRecents = other.removeReadBooksFromRecents;
+  moveFinishedToReadFolder = other.moveFinishedToReadFolder;
+  imageRendering = other.imageRendering;
+  tiltPageTurn = other.tiltPageTurn;
+  language = other.language;
+  quickResumeSleepScreen = other.quickResumeSleepScreen;
 }
 
 bool CrossPointSettings::loadFromFile() {
@@ -111,12 +176,12 @@ bool CrossPointSettings::loadFromFile() {
       {
         std::lock_guard<std::mutex> lock(_mutex);
         result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
-      }
-      if (result && resave) {
-        if (saveToFile()) {
-          LOG_DBG("CPS", "Resaved settings to update format");
-        } else {
-          LOG_ERR("CPS", "Failed to resave settings after format update");
+        if (result && resave) {
+          if (saveToFileLocked()) {
+            LOG_DBG("CPS", "Resaved settings to update format");
+          } else {
+            LOG_ERR("CPS", "Failed to resave settings after format update");
+          }
         }
       }
       migrateLanguageBinaryFile();

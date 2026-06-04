@@ -32,9 +32,19 @@ void CrossPointState::pushRecentSleep(uint16_t idx) {
 }
 
 bool CrossPointState::saveToFile() const {
-  std::lock_guard<std::mutex> lock(_mutex);
+  CrossPointState copy;
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    copy.openEpubPath = openEpubPath;
+    for (int i = 0; i < SLEEP_RECENT_COUNT; ++i) copy.recentSleepImages[i] = recentSleepImages[i];
+    copy.recentSleepPos = recentSleepPos;
+    copy.recentSleepFill = recentSleepFill;
+    copy.readerActivityLoadCount = readerActivityLoadCount;
+    copy.lastSleepFromReader = lastSleepFromReader;
+    copy.showBootScreen = showBootScreen;
+  }
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveState(*this, STATE_FILE_JSON);
+  return JsonSettingsIO::saveState(copy, STATE_FILE_JSON);
 }
 
 bool CrossPointState::loadFromFile() {

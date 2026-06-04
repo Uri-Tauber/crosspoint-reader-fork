@@ -237,15 +237,16 @@ static bool loadSleepFrameBuffer() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
-
   const bool isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
-  APP_STATE.showBootScreen = !isQuickResumeSleep;
-  ;
+
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+    APP_STATE.showBootScreen = !isQuickResumeSleep;
+  }
 
   APP_STATE.saveToFile();
 
@@ -432,11 +433,15 @@ void setup() {
       break;
   }
 
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  std::string openEpubPath = APP_STATE.openEpubPath;
-  bool lastSleepFromReader = APP_STATE.lastSleepFromReader;
-  uint8_t readerActivityLoadCount = APP_STATE.readerActivityLoadCount;
-  ;
+  std::string openEpubPath;
+  bool lastSleepFromReader;
+  uint8_t readerActivityLoadCount;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    openEpubPath = APP_STATE.openEpubPath;
+    lastSleepFromReader = APP_STATE.lastSleepFromReader;
+    readerActivityLoadCount = APP_STATE.readerActivityLoadCount;
+  }
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
@@ -445,8 +450,7 @@ void setup() {
   } else if (HalSystem::isRebootFromPanic()) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
-             !openEpubPath.empty()) {
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER && !openEpubPath.empty()) {
     activityManager.goToReader(openEpubPath);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall

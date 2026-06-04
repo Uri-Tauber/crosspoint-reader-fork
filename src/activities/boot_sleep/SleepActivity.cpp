@@ -28,9 +28,11 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  bool lastSleepFromReader = APP_STATE.lastSleepFromReader;
-  ;
+  bool lastSleepFromReader;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    lastSleepFromReader = APP_STATE.lastSleepFromReader;
+  }
 
   // Show popup with reader orientation only when going to sleep from reader
   if (lastSleepFromReader) {
@@ -127,12 +129,13 @@ void SleepActivity::renderCustomSleepScreen() const {
       const uint8_t window =
           static_cast<uint8_t>(std::min(static_cast<size_t>(APP_STATE.recentSleepFill), numFiles - 1));
       auto randomFileIndex = static_cast<uint16_t>(random(fileCount));
-      std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-      for (uint8_t attempt = 0; attempt < 20 && APP_STATE.isRecentSleep(randomFileIndex, window); attempt++) {
-        randomFileIndex = static_cast<uint16_t>(random(fileCount));
+      {
+        std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+        for (uint8_t attempt = 0; attempt < 20 && APP_STATE.isRecentSleep(randomFileIndex, window); attempt++) {
+          randomFileIndex = static_cast<uint16_t>(random(fileCount));
+        }
+        APP_STATE.pushRecentSleep(randomFileIndex);
       }
-      APP_STATE.pushRecentSleep(randomFileIndex);
-      ;
       APP_STATE.saveToFile();
       const auto filename = std::string(sleepDir) + "/" + files[randomFileIndex];
       HalFile randFile;
@@ -255,9 +258,11 @@ void SleepActivity::renderCoverSleepScreen() const {
       break;
   }
 
-  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
-  std::string openEpubPath = APP_STATE.openEpubPath;
-  ;
+  std::string openEpubPath;
+  {
+    std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+    openEpubPath = APP_STATE.openEpubPath;
+  }
 
   if (openEpubPath.empty()) {
     return (this->*renderNoCoverSleepScreen)();

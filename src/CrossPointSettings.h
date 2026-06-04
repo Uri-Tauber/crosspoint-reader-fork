@@ -20,6 +20,10 @@ class CrossPointSettings {
   CrossPointSettings(const CrossPointSettings&) = delete;
   CrossPointSettings& operator=(const CrossPointSettings&) = delete;
 
+  // Returns a non-recursive std::mutex. Callers must not call back into any SETTINGS
+  // methods that lock _mutex (e.g., CrossPointSettings::saveToFile()) while holding that mutex
+  // to avoid self-deadlock. If callers need to hold multiple singleton mutexes they must follow
+  // a consistent global lock ordering (e.g. acquire SETTINGS before APP_STATE) to prevent deadlocks.
   std::mutex& getMutex() const { return _mutex; }
 
   enum SLEEP_SCREEN_MODE {
@@ -279,8 +283,10 @@ class CrossPointSettings {
   // If count_only is true, returns the number of settings items that would be written.
   uint8_t writeSettings(HalFile& file, bool count_only = false) const;
 
+  bool saveToFileLocked() const;
   bool saveToFile() const;
   bool loadFromFile();
+  void copyFrom(const CrossPointSettings& other);
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
   static uint8_t sleepTimeoutEnumToMinutes(uint8_t legacyValue);
