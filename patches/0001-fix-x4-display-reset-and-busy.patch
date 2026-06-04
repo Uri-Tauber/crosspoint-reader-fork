@@ -1,0 +1,51 @@
+diff --git a/libs/display/EInkDisplay/src/EInkDisplay.cpp b/libs/display/EInkDisplay/src/EInkDisplay.cpp
+index 0495a95..f9801e2 100644
+--- a/libs/display/EInkDisplay/src/EInkDisplay.cpp
++++ b/libs/display/EInkDisplay/src/EInkDisplay.cpp
+@@ -530,7 +530,7 @@ void EInkDisplay::resetDisplay() {
+   digitalWrite(_rst, HIGH);
+   delay(20);
+   digitalWrite(_rst, LOW);
+-  delay(2);
++  delay(20);
+   digitalWrite(_rst, HIGH);
+   delay(20);
+   if (Serial)
+@@ -548,12 +548,26 @@ void EInkDisplay::waitForRefresh(const char *comment) {
+ void EInkDisplay::pollBusy(const char *comment, const char *completeWord) {
+   unsigned long start = millis();
+   if (!_x3Mode) {
+-    // X4: BUSY held HIGH while busy, drops LOW when done.
+-    while (digitalRead(_busy) == HIGH) {
++    // X4 (SSD1677): BUSY is active HIGH. Idle = LOW, working = HIGH.
++    // Wait up to 100ms for BUSY to go HIGH (race protection)
++    bool sawHigh = false;
++    while (digitalRead(_busy) == LOW) {
+       delay(1);
+-      if (millis() - start > 30000)
++      if (millis() - start > 100)
+         break;
+     }
++
++    if (digitalRead(_busy) == HIGH) {
++      sawHigh = true;
++      // Wait for it to drop LOW when done
++      while (digitalRead(_busy) == HIGH) {
++        delay(1);
++        if (millis() - start > 30000)
++          break;
++      }
++    }
++    if (!sawHigh)
++      return;
+   } else {
+     // X3 (UC81xx-class): BUSY is active LOW. Idle = HIGH, working = LOW.
+     // After a command that does work, BUSY transitions HIGH -> LOW (work
+@@ -818,6 +832,7 @@ void EInkDisplay::initDisplayController() {
+
+   // Soft reset
+   sendCommand(CMD_SOFT_RESET);
++  delay(10);
+   waitWhileBusy(" CMD_SOFT_RESET");
+
+   // Temperature sensor control (internal)
