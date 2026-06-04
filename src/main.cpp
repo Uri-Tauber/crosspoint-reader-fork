@@ -133,7 +133,8 @@ enum class BootResume : uint8_t {
 // on wake and already clears the heap, so rebooting here would just power the
 // device back up against the user's sleep gesture. Never cleared:
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
-static bool deepSleepInProgress = false;
+#include <atomic>
+static std::atomic<bool> deepSleepInProgress{false};
 
 void silentRestart() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
@@ -236,6 +237,7 @@ static bool loadSleepFrameBuffer() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
   const bool isQuickResumeSleep =
@@ -243,12 +245,13 @@ void enterDeepSleep(bool fromTimeout = false) {
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
   APP_STATE.showBootScreen = !isQuickResumeSleep;
+  ;
 
   APP_STATE.saveToFile();
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
-  deepSleepInProgress = true;
+  deepSleepInProgress.store(true);
   activityManager.goToSleep(fromTimeout);
 
   if (isQuickResumeSleep) {
@@ -429,6 +432,12 @@ void setup() {
       break;
   }
 
+  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+  std::string openEpubPath = APP_STATE.openEpubPath;
+  bool lastSleepFromReader = APP_STATE.lastSleepFromReader;
+  uint8_t readerActivityLoadCount = APP_STATE.readerActivityLoadCount;
+  ;
+
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
@@ -437,23 +446,27 @@ void setup() {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
-             !APP_STATE.openEpubPath.empty()) {
-    activityManager.goToReader(APP_STATE.openEpubPath);
+             !openEpubPath.empty()) {
+    activityManager.goToReader(openEpubPath);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
-  } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
-             mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
+  } else if (openEpubPath.empty() || !lastSleepFromReader ||
+             mappedInputManager.isPressed(MappedInputManager::Button::Back) || readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
     // crashed (indicated by readerActivityLoadCount > 0)
     activityManager.goHome();
   } else {
     // Clear app state to avoid getting into a boot loop if the epub doesn't load
-    const auto path = APP_STATE.openEpubPath;
-    APP_STATE.openEpubPath = "";
-    APP_STATE.readerActivityLoadCount++;
+    std::string path;
+    {
+      std::lock_guard<std::mutex> innerLock(APP_STATE.getMutex());
+      path = APP_STATE.openEpubPath;
+      APP_STATE.openEpubPath = "";
+      APP_STATE.readerActivityLoadCount++;
+    }
     APP_STATE.saveToFile();
     activityManager.goToReader(path);
   }

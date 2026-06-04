@@ -37,7 +37,9 @@ void TxtReaderActivity::onEnter() {
   // Save current txt as last opened file and add to recent books
   auto filePath = txt->getPath();
   auto fileName = filePath.substr(filePath.rfind('/') + 1);
+  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
   APP_STATE.openEpubPath = filePath;
+  ;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(filePath, fileName, "", "");
 
@@ -53,7 +55,9 @@ void TxtReaderActivity::onExit() {
 
   pageOffsets.clear();
   currentPageLines.clear();
+  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
   APP_STATE.readerActivityLoadCount = 0;
+  ;
   APP_STATE.saveToFile();
   txt.reset();
 }

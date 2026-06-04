@@ -32,6 +32,7 @@ void CrossPointState::pushRecentSleep(uint16_t idx) {
 }
 
 bool CrossPointState::saveToFile() const {
+  std::lock_guard<std::mutex> lock(_mutex);
   Storage.mkdir("/.crosspoint");
   return JsonSettingsIO::saveState(*this, STATE_FILE_JSON);
 }
@@ -41,6 +42,7 @@ bool CrossPointState::loadFromFile() {
   if (Storage.exists(STATE_FILE_JSON)) {
     String json = Storage.readFile(STATE_FILE_JSON);
     if (!json.isEmpty()) {
+      std::lock_guard<std::mutex> lock(_mutex);
       return JsonSettingsIO::loadState(*this, json.c_str());
     }
   }
@@ -67,6 +69,8 @@ bool CrossPointState::loadFromBinaryFile() {
   if (!Storage.openFileForRead("CPS", STATE_FILE_BIN, inputFile)) {
     return false;
   }
+
+  std::lock_guard<std::mutex> lock(_mutex);
 
   uint8_t version;
   serialization::readPod(inputFile, version);

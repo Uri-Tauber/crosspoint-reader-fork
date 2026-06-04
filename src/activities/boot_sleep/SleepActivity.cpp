@@ -28,8 +28,12 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
+  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+  bool lastSleepFromReader = APP_STATE.lastSleepFromReader;
+  ;
+
   // Show popup with reader orientation only when going to sleep from reader
-  if (APP_STATE.lastSleepFromReader) {
+  if (lastSleepFromReader) {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
     renderer.setOrientation(GfxRenderer::Orientation::Portrait);
@@ -45,7 +49,7 @@ void SleepActivity::onEnter() {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER):
       return renderCoverSleepScreen();
     case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM):
-      if (APP_STATE.lastSleepFromReader) {
+      if (lastSleepFromReader) {
         return renderCoverSleepScreen();
       } else {
         return renderCustomSleepScreen();
@@ -123,10 +127,12 @@ void SleepActivity::renderCustomSleepScreen() const {
       const uint8_t window =
           static_cast<uint8_t>(std::min(static_cast<size_t>(APP_STATE.recentSleepFill), numFiles - 1));
       auto randomFileIndex = static_cast<uint16_t>(random(fileCount));
+      std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
       for (uint8_t attempt = 0; attempt < 20 && APP_STATE.isRecentSleep(randomFileIndex, window); attempt++) {
         randomFileIndex = static_cast<uint16_t>(random(fileCount));
       }
       APP_STATE.pushRecentSleep(randomFileIndex);
+      ;
       APP_STATE.saveToFile();
       const auto filename = std::string(sleepDir) + "/" + files[randomFileIndex];
       HalFile randFile;
@@ -249,7 +255,11 @@ void SleepActivity::renderCoverSleepScreen() const {
       break;
   }
 
-  if (APP_STATE.openEpubPath.empty()) {
+  std::lock_guard<std::mutex> lock(APP_STATE.getMutex());
+  std::string openEpubPath = APP_STATE.openEpubPath;
+  ;
+
+  if (openEpubPath.empty()) {
     return (this->*renderNoCoverSleepScreen)();
   }
 
@@ -257,9 +267,9 @@ void SleepActivity::renderCoverSleepScreen() const {
   bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
 
   // Check if the current book is XTC, TXT, or EPUB
-  if (FsHelpers::hasXtcExtension(APP_STATE.openEpubPath)) {
+  if (FsHelpers::hasXtcExtension(openEpubPath)) {
     // Handle XTC file
-    Xtc lastXtc(APP_STATE.openEpubPath, "/.crosspoint");
+    Xtc lastXtc(openEpubPath, "/.crosspoint");
     if (!lastXtc.load()) {
       LOG_ERR("SLP", "Failed to load last XTC");
       return (this->*renderNoCoverSleepScreen)();
@@ -271,9 +281,9 @@ void SleepActivity::renderCoverSleepScreen() const {
     }
 
     coverBmpPath = lastXtc.getCoverBmpPath();
-  } else if (FsHelpers::hasTxtExtension(APP_STATE.openEpubPath)) {
+  } else if (FsHelpers::hasTxtExtension(openEpubPath)) {
     // Handle TXT file - looks for cover image in the same folder
-    Txt lastTxt(APP_STATE.openEpubPath, "/.crosspoint");
+    Txt lastTxt(openEpubPath, "/.crosspoint");
     if (!lastTxt.load()) {
       LOG_ERR("SLP", "Failed to load last TXT");
       return (this->*renderNoCoverSleepScreen)();
@@ -285,9 +295,9 @@ void SleepActivity::renderCoverSleepScreen() const {
     }
 
     coverBmpPath = lastTxt.getCoverBmpPath();
-  } else if (FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) {
+  } else if (FsHelpers::hasEpubExtension(openEpubPath)) {
     // Handle EPUB file
-    Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");
+    Epub lastEpub(openEpubPath, "/.crosspoint");
     // Skip loading css since we only need metadata here
     if (!lastEpub.load(true, true)) {
       LOG_ERR("SLP", "Failed to load last epub");

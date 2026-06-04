@@ -1,12 +1,19 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <mutex>
 
 class CrossPointState {
+  mutable std::mutex _mutex;
+
   // Static instance
   static CrossPointState instance;
 
  public:
+  CrossPointState() = default;
+
+  std::mutex& getMutex() const { return _mutex; }
+
   static constexpr uint8_t SLEEP_RECENT_COUNT = 16;
 
   std::string openEpubPath;

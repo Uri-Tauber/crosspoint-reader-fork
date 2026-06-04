@@ -45,6 +45,11 @@ class CrossPointWebServer {
     std::vector<uint8_t> buffer;
     size_t bufferPos = 0;
 
+    unsigned long uploadStartTime = 0;
+    unsigned long totalWriteTime = 0;
+    size_t writeCount = 0;
+    size_t lastLoggedSize = 0;
+
     UploadState() { buffer.resize(UPLOAD_BUFFER_SIZE); }
   } upload;
 

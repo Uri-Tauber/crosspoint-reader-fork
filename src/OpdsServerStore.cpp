@@ -45,22 +45,29 @@ bool OpdsServerStore::loadFromFile() {
 }
 
 bool OpdsServerStore::migrateFromSettings() {
-  if (strlen(SETTINGS.opdsServerUrl) == 0) {
-    return false;
+  OpdsServer server;
+  {
+    std::lock_guard<std::mutex> lock(SETTINGS.getMutex());
+    if (strlen(SETTINGS.opdsServerUrl) == 0) {
+      return false;
+    }
+
+    server.name = "OPDS Server";
+    server.url = SETTINGS.opdsServerUrl;
+    server.username = SETTINGS.opdsUsername;
+    server.password = SETTINGS.opdsPassword;
   }
 
-  OpdsServer server;
-  server.name = "OPDS Server";
-  server.url = SETTINGS.opdsServerUrl;
-  server.username = SETTINGS.opdsUsername;
-  server.password = SETTINGS.opdsPassword;
   servers.push_back(std::move(server));
 
   if (saveToFile()) {
     // Clear legacy fields so migration won't run again on next boot
-    SETTINGS.opdsServerUrl[0] = '\0';
-    SETTINGS.opdsUsername[0] = '\0';
-    SETTINGS.opdsPassword[0] = '\0';
+    {
+      std::lock_guard<std::mutex> lock(SETTINGS.getMutex());
+      SETTINGS.opdsServerUrl[0] = '\0';
+      SETTINGS.opdsUsername[0] = '\0';
+      SETTINGS.opdsPassword[0] = '\0';
+    }
     SETTINGS.saveToFile();
     LOG_DBG("OPS", "Migrated single-server OPDS config to opds.json");
     return true;
