@@ -569,18 +569,13 @@ void CrossPointWebServer::handleDownload() const {
   file.close();
 }
 
-// Diagnostic counters for upload performance analysis
-static unsigned long uploadStartTime = 0;
-static unsigned long totalWriteTime = 0;
-static size_t writeCount = 0;
-
 static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
   if (state.bufferPos > 0 && state.file) {
     esp_task_wdt_reset();  // Reset watchdog before potentially slow SD write
     const unsigned long writeStart = millis();
     const size_t written = state.file.write(state.buffer.data(), state.bufferPos);
-    totalWriteTime += millis() - writeStart;
-    writeCount++;
+    state.totalWriteTime += millis() - writeStart;
+    state.writeCount++;
     esp_task_wdt_reset();  // Reset watchdog after SD write
 
     if (written != state.bufferPos) {
@@ -594,8 +589,6 @@ static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
 }
 
 void CrossPointWebServer::handleUpload(UploadState& state) const {
-  static size_t lastLoggedSize = 0;
-
   // Reset watchdog at start of every upload callback - HTTP parsing can be slow
   esp_task_wdt_reset();
 
@@ -615,11 +608,11 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     state.size = 0;
     state.success = false;
     state.error = "";
-    uploadStartTime = millis();
-    lastLoggedSize = 0;
+    state.uploadStartTime = millis();
+    state.lastLoggedSize = 0;
     state.bufferPos = 0;
-    totalWriteTime = 0;
-    writeCount = 0;
+    state.totalWriteTime = 0;
+    state.writeCount = 0;
 
     // Get upload path from query parameter (defaults to root if not specified)
     // Note: We use query parameter instead of form data because multipart form
@@ -693,12 +686,12 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       state.size += upload.currentSize;
 
       // Log progress every 100KB
-      if (state.size - lastLoggedSize >= 102400) {
-        const unsigned long elapsed = millis() - uploadStartTime;
+      if (state.size - state.lastLoggedSize >= 102400) {
+        const unsigned long elapsed = millis() - state.uploadStartTime;
         const float kbps = (elapsed > 0) ? (state.size / 1024.0) / (elapsed / 1000.0) : 0;
         LOG_DBG("WEB", "[UPLOAD] %d bytes (%.1f KB), %.1f KB/s, %d writes", state.size, state.size / 1024.0, kbps,
-                writeCount);
-        lastLoggedSize = state.size;
+                state.writeCount);
+        state.lastLoggedSize = state.size;
       }
     }
   } else if (upload.status == UPLOAD_FILE_END) {
@@ -711,12 +704,12 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
       if (state.error.isEmpty()) {
         state.success = true;
-        const unsigned long elapsed = millis() - uploadStartTime;
+        const unsigned long elapsed = millis() - state.uploadStartTime;
         const float avgKbps = (elapsed > 0) ? (state.size / 1024.0) / (elapsed / 1000.0) : 0;
-        const float writePercent = (elapsed > 0) ? (totalWriteTime * 100.0 / elapsed) : 0;
+        const float writePercent = (elapsed > 0) ? (state.totalWriteTime * 100.0 / elapsed) : 0;
         LOG_DBG("WEB", "[UPLOAD] Complete: %s (%d bytes in %lu ms, avg %.1f KB/s)", state.fileName.c_str(), state.size,
                 elapsed, avgKbps);
-        LOG_DBG("WEB", "[UPLOAD] Diagnostics: %d writes, total write time: %lu ms (%.1f%%)", writeCount, totalWriteTime,
+        LOG_DBG("WEB", "[UPLOAD] Diagnostics: %d writes, total write time: %lu ms (%.1f%%)", state.writeCount, state.totalWriteTime,
                 writePercent);
 
         // Clear epub cache to prevent stale metadata issues when overwriting files
@@ -1117,8 +1110,10 @@ void CrossPointWebServer::handleGetSettings() const {
   bool seenFirst = false;
   JsonDocument doc;
 
-  for (const auto& s : settings) {
-    if (!s.key) continue;  // Skip ACTION-only entries
+  {
+    std::lock_guard<std::mutex> lock(SETTINGS.getMutex());
+    for (const auto& s : settings) {
+      if (!s.key) continue;  // Skip ACTION-only entries
 
     doc.clear();
     doc["key"] = s.key;
@@ -1181,12 +1176,13 @@ void CrossPointWebServer::handleGetSettings() const {
       continue;
     }
 
-    if (seenFirst) {
-      server->sendContent(",");
-    } else {
-      seenFirst = true;
+      if (seenFirst) {
+        server->sendContent(",");
+      } else {
+        seenFirst = true;
+      }
+      server->sendContent(output);
     }
-    server->sendContent(output);
   }
 
   server->sendContent("]");
@@ -1211,9 +1207,11 @@ void CrossPointWebServer::handlePostSettings() {
   const auto& settings = getSettingsList(&sdFontSystem.registry());
   int applied = 0;
 
-  for (const auto& s : settings) {
-    if (!s.key) continue;
-    if (!doc[s.key].is<JsonVariant>()) continue;
+  {
+    std::lock_guard<std::mutex> lock(SETTINGS.getMutex());
+    for (const auto& s : settings) {
+      if (!s.key) continue;
+      if (!doc[s.key].is<JsonVariant>()) continue;
 
     switch (s.type) {
       case SettingType::TOGGLE: {
@@ -1260,8 +1258,9 @@ void CrossPointWebServer::handlePostSettings() {
         applied++;
         break;
       }
-      default:
-        break;
+        default:
+          break;
+      }
     }
   }
 
