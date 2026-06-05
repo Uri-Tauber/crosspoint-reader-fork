@@ -929,14 +929,26 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   // Calculate output row size (2 bits per pixel, packed into bytes)
   // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
-  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
-  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
 
-  if (!outputRow || !rowBytes) {
-    LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
-    free(outputRow);
-    free(rowBytes);
-    return;
+  // SBO for row buffers: typically screen width is around 1000px, so 1024 bytes is enough.
+  uint8_t outputRowStack[1024];
+  uint8_t rowBytesStack[1024];
+
+  uint8_t* outputRow = outputRowStack;
+  uint8_t* rowBytes = rowBytesStack;
+
+  bool usedHeap = false;
+  if (static_cast<size_t>(outputRowSize) > sizeof(outputRowStack) ||
+      static_cast<size_t>(bitmap.getRowBytes()) > sizeof(rowBytesStack)) {
+    outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
+    rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
+    usedHeap = true;
+    if (!outputRow || !rowBytes) {
+      LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
+      free(outputRow);
+      free(rowBytes);
+      return;
+    }
   }
 
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
@@ -953,8 +965,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
+      if (usedHeap) {
+        free(outputRow);
+        free(rowBytes);
+      }
       return;
     }
 
@@ -992,8 +1006,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     }
   }
 
-  free(outputRow);
-  free(rowBytes);
+  if (usedHeap) {
+    free(outputRow);
+    free(rowBytes);
+  }
 }
 
 void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
@@ -1011,22 +1027,35 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
 
   // For 1-bit BMP, output is still 2-bit packed (for consistency with readNextRow)
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
-  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
-  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
 
-  if (!outputRow || !rowBytes) {
-    LOG_ERR("GFX", "!! Failed to allocate 1-bit BMP row buffers");
-    free(outputRow);
-    free(rowBytes);
-    return;
+  uint8_t outputRowStack[1024];
+  uint8_t rowBytesStack[1024];
+
+  uint8_t* outputRow = outputRowStack;
+  uint8_t* rowBytes = rowBytesStack;
+
+  bool usedHeap = false;
+  if (static_cast<size_t>(outputRowSize) > sizeof(outputRowStack) ||
+      static_cast<size_t>(bitmap.getRowBytes()) > sizeof(rowBytesStack)) {
+    outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
+    rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
+    usedHeap = true;
+    if (!outputRow || !rowBytes) {
+      LOG_ERR("GFX", "!! Failed to allocate 1-bit BMP row buffers");
+      free(outputRow);
+      free(rowBytes);
+      return;
+    }
   }
 
   for (int bmpY = 0; bmpY < bitmap.getHeight(); bmpY++) {
     // Read rows sequentially using readNextRow
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from 1-bit bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
+      if (usedHeap) {
+        free(outputRow);
+        free(rowBytes);
+      }
       return;
     }
 
@@ -1061,8 +1090,10 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
     }
   }
 
-  free(outputRow);
-  free(rowBytes);
+  if (usedHeap) {
+    free(outputRow);
+    free(rowBytes);
+  }
 }
 
 void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state) const {
@@ -1080,10 +1111,18 @@ void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoi
   if (maxY >= getScreenHeight()) maxY = getScreenHeight() - 1;
 
   // Allocate node buffer for scanline algorithm
-  auto* nodeX = static_cast<int*>(malloc(numPoints * sizeof(int)));
-  if (!nodeX) {
-    LOG_ERR("GFX", "!! Failed to allocate polygon node buffer");
-    return;
+  // SBO: Polygons rarely have more than 16 points.
+  int nodeXStack[16];
+  int* nodeX = nodeXStack;
+  bool usedHeap = false;
+
+  if (numPoints > 16) {
+    nodeX = static_cast<int*>(malloc(numPoints * sizeof(int)));
+    usedHeap = true;
+    if (!nodeX) {
+      LOG_ERR("GFX", "!! Failed to allocate polygon node buffer");
+      return;
+    }
   }
 
   // Scanline fill algorithm
@@ -1122,7 +1161,9 @@ void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoi
     }
   }
 
-  free(nodeX);
+  if (usedHeap) {
+    free(nodeX);
+  }
 }
 
 // For performance measurement (using static to allow "const" methods)

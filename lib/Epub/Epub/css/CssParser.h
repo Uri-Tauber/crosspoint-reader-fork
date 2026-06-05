@@ -127,6 +127,6 @@ class CssParser {
   // String utilities
   static std::string normalized(const std::string& s);
   static void normalizedInto(const std::string& s, std::string& out);
-  static std::vector<std::string> splitOnChar(const std::string& s, char delimiter);
-  static std::vector<std::string> splitWhitespace(const std::string& s);
+  static std::vector<std::string_view> splitOnChar(std::string_view s, char delimiter);
+  static std::vector<std::string_view> splitWhitespace(std::string_view s);
 };
