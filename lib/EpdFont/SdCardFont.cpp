@@ -115,6 +115,7 @@ void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
   delete[] s.fullIntervals;
   s.fullIntervals = nullptr;
+  s.intervalsLoadFailed = false;
   freeStyleKernLigatureData(s);
   s.present = false;
 }
@@ -551,23 +552,26 @@ bool SdCardFont::load(const char* path) {
 // --- Lazy interval loading ---
 
 // Load fullIntervals for styleIdx from the .cpfont file. First call does I/O;
-// subsequent calls are a cheap null check. Failures clear the partial
-// allocation so a retry path stays consistent.
+// subsequent calls are a cheap null check. On failure the style is latched so
+// future calls skip the SD round-trip (avoids timeout cascades on flaky cards).
 bool SdCardFont::ensureStyleIntervalsLoaded(uint8_t styleIdx) {
   if (styleIdx >= MAX_STYLES) return false;
   auto& s = styles_[styleIdx];
   if (!s.present) return false;
   if (s.fullIntervals) return true;
+  if (s.intervalsLoadFailed) return false;
 
   HalFile file;
   if (!Storage.openFileForRead("SDCF", filePath_, file)) {
     LOG_ERR("SDCF", "Failed to open .cpfont for intervals: %s", filePath_);
+    s.intervalsLoadFailed = true;
     return false;
   }
 
   s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
   if (!s.fullIntervals) {
     LOG_ERR("SDCF", "Failed to allocate %u intervals for style %u", s.header.intervalCount, styleIdx);
+    s.intervalsLoadFailed = true;
     return false;
   }
 
@@ -575,6 +579,7 @@ bool SdCardFont::ensureStyleIntervalsLoaded(uint8_t styleIdx) {
     LOG_ERR("SDCF", "Failed to seek to intervals for style %u", styleIdx);
     delete[] s.fullIntervals;
     s.fullIntervals = nullptr;
+    s.intervalsLoadFailed = true;
     return false;
   }
   const size_t intervalsBytes = s.header.intervalCount * sizeof(EpdUnicodeInterval);
@@ -582,6 +587,7 @@ bool SdCardFont::ensureStyleIntervalsLoaded(uint8_t styleIdx) {
     LOG_ERR("SDCF", "Failed to read intervals for style %u", styleIdx);
     delete[] s.fullIntervals;
     s.fullIntervals = nullptr;
+    s.intervalsLoadFailed = true;
     return false;
   }
 
@@ -597,6 +603,7 @@ bool SdCardFont::ensureStyleIntervalsLoaded(uint8_t styleIdx) {
               static_cast<unsigned long>(iv.first), static_cast<unsigned long>(iv.last));
       delete[] s.fullIntervals;
       s.fullIntervals = nullptr;
+      s.intervalsLoadFailed = true;
       return false;
     }
     const uint32_t span = iv.last - iv.first + 1;
@@ -609,6 +616,7 @@ bool SdCardFont::ensureStyleIntervalsLoaded(uint8_t styleIdx) {
               overlapsPrev, span, offsetMismatch, offsetOverruns);
       delete[] s.fullIntervals;
       s.fullIntervals = nullptr;
+      s.intervalsLoadFailed = true;
       return false;
     }
     expectedOffset += span;
