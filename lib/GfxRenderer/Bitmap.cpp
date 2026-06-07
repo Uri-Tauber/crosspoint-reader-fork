@@ -100,12 +100,10 @@ BmpReaderError Bitmap::parseHeaders() {
     return BmpReaderError::FileInvalid;
   }
 
-  auto leU16 = [](const uint8_t* p) -> uint16_t {
-    return static_cast<uint16_t>(p[0] | (uint16_t(p[1]) << 8));
-  };
+  auto leU16 = [](const uint8_t* p) -> uint16_t { return static_cast<uint16_t>(p[0] | (uint16_t(p[1]) << 8)); };
   auto leU32 = [](const uint8_t* p) -> uint32_t {
-    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
   };
   auto leI32 = [&leU32](const uint8_t* p) -> int32_t { return static_cast<int32_t>(leU32(p)); };
 
@@ -293,8 +291,10 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
         memcpy(data, rowBuffer, bytesIn);
         bitShift = 6;
         outPtr = data + bytesIn;
-        if (atkinsonDitherer) atkinsonDitherer->nextRow();
-        else if (fsDitherer)  fsDitherer->nextRow();
+        if (atkinsonDitherer)
+          atkinsonDitherer->nextRow();
+        else if (fsDitherer)
+          fsDitherer->nextRow();
         return BmpReaderError::Ok;
       }
       // Slow path for non-standard palettes — full unpack/repack via packPixel.
@@ -374,12 +374,10 @@ BmpReaderError Bitmap::parseAndLoadAll() {
   }
 
   const uint8_t* hdr = preloadedRows_;
-  auto leU16 = [](const uint8_t* p) -> uint16_t {
-    return static_cast<uint16_t>(p[0] | (uint16_t(p[1]) << 8));
-  };
+  auto leU16 = [](const uint8_t* p) -> uint16_t { return static_cast<uint16_t>(p[0] | (uint16_t(p[1]) << 8)); };
   auto leU32 = [](const uint8_t* p) -> uint32_t {
-    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
   };
   auto leI32 = [&leU32](const uint8_t* p) -> int32_t { return static_cast<int32_t>(leU32(p)); };
 
