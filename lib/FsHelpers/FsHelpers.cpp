@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace FsHelpers {

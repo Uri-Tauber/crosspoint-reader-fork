@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
-#include <vector>
-#include <string>
+
 #include <algorithm>
+#include <string>
+#include <vector>
+
 #include "FsHelpers.h"
 
 // Wrapper to test the comparator used in FsHelpers::sortFileList
