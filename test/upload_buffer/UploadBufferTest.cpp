@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
-#include <vector>
-#include <string>
+
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -14,7 +15,7 @@ struct MockHalFile {
 
   operator bool() const { return is_open; }
   void close() { is_open = false; }
-  
+
   size_t write(const uint8_t* buf, size_t size) {
     if (!is_open) return 0;
     buffer.append(reinterpret_cast<const char*>(buf), size);
@@ -80,14 +81,12 @@ std::vector<uint8_t> makeData(size_t size) {
   return data;
 }
 
-} // namespace
+}  // namespace
 
 class UploadBufferTest : public ::testing::Test {
-protected:
+ protected:
   UploadBuffer state;
-  void SetUp() override {
-    state.init();
-  }
+  void SetUp() override { state.init(); }
 };
 
 TEST_F(UploadBufferTest, FlushEmptySucceeds) {
