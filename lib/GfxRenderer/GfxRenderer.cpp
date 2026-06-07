@@ -939,24 +939,40 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     return;
   }
 
-  for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
+  const uint32_t scale_fp = isScaled ? static_cast<uint32_t>(scale * 65536.0f + 0.5f) : 65536U;
+  const bool preloaded = const_cast<Bitmap&>(bitmap).preloadAllRows();
+  const int bmpWidth = bitmap.getWidth();
+  const int bmpHeight = bitmap.getHeight();
+  const int screenWidth = getScreenWidth();
+  const int screenHeight = getScreenHeight();
+  const bool topDown = bitmap.isTopDown();
+  const bool fastBitmapBpp = (bitmap.getBpp() == 2);
+  const RenderMode rmode = renderMode;
+
+  for (int bmpY = 0; bmpY < (bmpHeight - cropPixY); bmpY++) {
     // The BMP's (0, 0) is the bottom-left corner (if the height is positive, top-left if negative).
     // Screen's (0, 0) is the top-left corner.
-    int screenY = -cropPixY + (bitmap.isTopDown() ? bmpY : bitmap.getHeight() - 1 - bmpY);
+    int screenY = -cropPixY + (topDown ? bmpY : bmpHeight - 1 - bmpY);
     if (isScaled) {
-      screenY = std::floor(screenY * scale);
+      screenY = (screenY * scale_fp) >> 16;
     }
     screenY += y;  // the offset should not be scaled
-    if (screenY >= getScreenHeight()) {
+    if (screenY >= screenHeight) {
       break;
     }
 
-    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
-      LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
-      return;
+    const uint8_t* srcRow = nullptr;
+    if (preloaded && fastBitmapBpp) {
+      srcRow = bitmap.preloadedRow(bmpY);
+    } else {
+      if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+        LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
+        free(outputRow);
+        free(rowBytes);
+        return;
+      }
     }
+    const uint8_t* row = srcRow ? srcRow : outputRow;
 
     if (screenY < 0) {
       continue;
@@ -967,26 +983,26 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       continue;
     }
 
-    for (int bmpX = cropPixX; bmpX < bitmap.getWidth() - cropPixX; bmpX++) {
+    for (int bmpX = cropPixX; bmpX < bmpWidth - cropPixX; bmpX++) {
       int screenX = bmpX - cropPixX;
       if (isScaled) {
-        screenX = std::floor(screenX * scale);
+        screenX = (screenX * scale_fp) >> 16;
       }
       screenX += x;  // the offset should not be scaled
-      if (screenX >= getScreenWidth()) {
+      if (screenX >= screenWidth) {
         break;
       }
       if (screenX < 0) {
         continue;
       }
 
-      const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
+      const uint8_t val = (row[bmpX >> 2] >> (6 - ((bmpX & 3) << 1))) & 0x3;
 
-      if (renderMode == BW && val < 3) {
+      if (rmode == BW && val < 3) {
         drawPixel(screenX, screenY);
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
+      } else if (rmode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
         drawPixel(screenX, screenY, false);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
+      } else if (rmode == GRAYSCALE_LSB && val == 1) {
         drawPixel(screenX, screenY, false);
       }
     }
