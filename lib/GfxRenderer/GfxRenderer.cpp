@@ -1183,9 +1183,7 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
   display.displayBuffer(refreshMode, fadingFix);
 }
 
-void GfxRenderer::displayBufferDriveAll(bool turnOffScreen) const {
-  display.displayBufferDriveAll(turnOffScreen);
-}
+void GfxRenderer::displayBufferDriveAll(bool turnOffScreen) const { display.displayBufferDriveAll(turnOffScreen); }
 
 void GfxRenderer::displayWindow(int x, int y, int width, int height, bool turnOffScreen, bool partialRedSync) const {
   // Translate logical coordinates to physical
