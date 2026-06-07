@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <cstdint>
 #include <vector>
 
 namespace FsHelpers {
@@ -84,16 +85,17 @@ void sortFileList(std::vector<std::string>& strs) {
 
     // Iterate while both strings have characters
     while (*s1 && *s2) {
+      const auto uc = [](char c) { return static_cast<unsigned char>(c); };
       // Check if both are at the start of a number
-      if (isdigit(*s1) && isdigit(*s2)) {
+      if (std::isdigit(uc(*s1)) && std::isdigit(uc(*s2))) {
         // Skip leading zeros and track them
         while (*s1 == '0') s1++;
         while (*s2 == '0') s2++;
 
         // Count digits to compare lengths first
         int len1 = 0, len2 = 0;
-        while (isdigit(s1[len1])) len1++;
-        while (isdigit(s2[len2])) len2++;
+        while (std::isdigit(uc(s1[len1]))) len1++;
+        while (std::isdigit(uc(s2[len2]))) len2++;
 
         // Different length so return smaller integer value
         if (len1 != len2) return len1 < len2;
@@ -108,8 +110,8 @@ void sortFileList(std::vector<std::string>& strs) {
         s2 += len2;
       } else {
         // Regular case-insensitive character comparison
-        char c1 = tolower(*s1);
-        char c2 = tolower(*s2);
+        char c1 = std::tolower(uc(*s1));
+        char c2 = std::tolower(uc(*s2));
         if (c1 != c2) return c1 < c2;
         s1++;
         s2++;

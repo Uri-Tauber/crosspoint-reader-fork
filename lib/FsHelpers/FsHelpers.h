@@ -1,5 +1,7 @@
 #pragma once
+#ifdef ARDUINO
 #include <WString.h>
+#endif
 
 #include <string>
 #include <string_view>
@@ -17,54 +19,57 @@ void sortFileList(std::vector<std::string>& strs);
  * Check if the given filename ends with the specified extension (case-insensitive).
  */
 bool checkFileExtension(std::string_view fileName, const char* extension);
-inline bool checkFileExtension(const String& fileName, const char* extension) {
-  return checkFileExtension(std::string_view{fileName.c_str(), fileName.length()}, extension);
-}
 
 // Check for either .jpg or .jpeg extension (case-insensitive)
 bool hasJpgExtension(std::string_view fileName);
-inline bool hasJpgExtension(const String& fileName) {
-  return hasJpgExtension(std::string_view{fileName.c_str(), fileName.length()});
-}
 
 // Check for .png extension (case-insensitive)
 bool hasPngExtension(std::string_view fileName);
-inline bool hasPngExtension(const String& fileName) {
-  return hasPngExtension(std::string_view{fileName.c_str(), fileName.length()});
-}
 
 // Check for .bmp extension (case-insensitive)
 bool hasBmpExtension(std::string_view fileName);
 
 // Check for .gif extension (case-insensitive)
 bool hasGifExtension(std::string_view fileName);
-inline bool hasGifExtension(const String& fileName) {
-  return hasGifExtension(std::string_view{fileName.c_str(), fileName.length()});
-}
 
 // Check for .epub extension (case-insensitive)
 bool hasEpubExtension(std::string_view fileName);
-inline bool hasEpubExtension(const String& fileName) {
-  return hasEpubExtension(std::string_view{fileName.c_str(), fileName.length()});
-}
 
 // Check for either .xtc or .xtch extension (case-insensitive)
 bool hasXtcExtension(std::string_view fileName);
 
 // Check for .txt extension (case-insensitive)
 bool hasTxtExtension(std::string_view fileName);
-inline bool hasTxtExtension(const String& fileName) {
-  return hasTxtExtension(std::string_view{fileName.c_str(), fileName.length()});
-}
 
 // Check for .md extension (case-insensitive)
 bool hasMarkdownExtension(std::string_view fileName);
 
 // Check for .css extension (case-insensitive)
 bool hasCssExtension(std::string_view fileName);
+
+#ifdef ARDUINO
+inline bool checkFileExtension(const String& fileName, const char* extension) {
+  return checkFileExtension(std::string_view{fileName.c_str(), fileName.length()}, extension);
+}
+inline bool hasJpgExtension(const String& fileName) {
+  return hasJpgExtension(std::string_view{fileName.c_str(), fileName.length()});
+}
+inline bool hasPngExtension(const String& fileName) {
+  return hasPngExtension(std::string_view{fileName.c_str(), fileName.length()});
+}
+inline bool hasGifExtension(const String& fileName) {
+  return hasGifExtension(std::string_view{fileName.c_str(), fileName.length()});
+}
+inline bool hasEpubExtension(const String& fileName) {
+  return hasEpubExtension(std::string_view{fileName.c_str(), fileName.length()});
+}
+inline bool hasTxtExtension(const String& fileName) {
+  return hasTxtExtension(std::string_view{fileName.c_str(), fileName.length()});
+}
 inline bool hasCssExtension(const String& fileName) {
   return hasCssExtension(std::string_view{fileName.c_str(), fileName.length()});
 }
+#endif
 std::string extractFolderPath(const std::string& filePath);
 
 /**
