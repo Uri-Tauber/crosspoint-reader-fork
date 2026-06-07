@@ -6,6 +6,9 @@
 
 #include <cassert>
 
+#include <LittleFS.h>
+#include <SPI.h>
+#include "HalStorage.h"
 #include "HalGPIO.h"
 
 HalPowerManager powerManager;  // Singleton instance
@@ -75,6 +78,11 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   logSerial.end();
 #endif
 
+  // Power down peripherals before deep sleep to minimize current draw
+  Storage.end();
+  LittleFS.end();
+  SPI.end();
+
   // Pre-sleep routines from the original firmware
   // GPIO13 is connected to battery latch MOSFET, we need to make sure it's low during sleep
   // Note that this means the MCU will be completely powered off during sleep, including RTC
@@ -82,7 +90,19 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
   gpio_set_level(GPIO_SPIWP, 0);
   esp_sleep_config_gpio_isolate();
-  gpio_deep_sleep_hold_en();
+  
+  // Disable internal pull-ups/pull-downs on all GPIOs to minimize leakage current during deep sleep.
+  // Skips POWER_BUTTON_PIN (wakeup source — needs pull-up to avoid floating/spurious wakeups).
+  static constexpr gpio_num_t pins[] = {
+      GPIO_NUM_0,  GPIO_NUM_1,  GPIO_NUM_2,  GPIO_NUM_4,  GPIO_NUM_5,
+      GPIO_NUM_6,  GPIO_NUM_7,  GPIO_NUM_8,  GPIO_NUM_9,  GPIO_NUM_10, GPIO_NUM_13,
+      GPIO_NUM_20, GPIO_NUM_21,
+  };
+  for (auto pin : pins) {
+    gpio_pullup_dis(pin);
+    gpio_pulldown_dis(pin);
+  }
+  
   gpio_hold_en(GPIO_SPIWP);
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
   // Arm the wakeup trigger *after* the button is released
