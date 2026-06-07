@@ -1183,6 +1183,43 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
   display.displayBuffer(refreshMode, fadingFix);
 }
 
+void GfxRenderer::displayBufferDriveAll(bool turnOffScreen) const {
+  display.displayBufferDriveAll(turnOffScreen);
+}
+
+void GfxRenderer::displayWindow(int x, int y, int width, int height, bool turnOffScreen, bool partialRedSync) const {
+  // Translate logical coordinates to physical
+  int px, py, pw, ph;
+  switch (orientation) {
+    case LandscapeClockwise:
+      px = panelWidth - y - height;
+      py = x;
+      pw = height;
+      ph = width;
+      break;
+    case PortraitInverted:
+      px = panelWidth - x - width;
+      py = panelHeight - y - height;
+      pw = width;
+      ph = height;
+      break;
+    case LandscapeCounterClockwise:
+      px = y;
+      py = panelHeight - x - width;
+      pw = height;
+      ph = width;
+      break;
+    case Portrait:
+    default:
+      px = x;
+      py = y;
+      pw = width;
+      ph = height;
+      break;
+  }
+  display.displayWindow(px, py, pw, ph, turnOffScreen, partialRedSync);
+}
+
 std::string GfxRenderer::truncatedText(const int fontId, const char* text, const int maxWidth,
                                        const EpdFontFamily::Style style) const {
   if (!text || maxWidth <= 0) return "";
