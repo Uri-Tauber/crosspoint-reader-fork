@@ -79,7 +79,7 @@ int32_t jpegRead(JPEGFILE* pFile, uint8_t* pBuf, int32_t iLen) {
   while (copied < iLen) {
     if (ctx->bufferPos >= ctx->bufferFilled) {
       // Refill the pump buffer.
-            const int readResult = ctx->file->read(ctx->buffer, JpegPumpCtx::kBufferSize);
+      const int readResult = ctx->file->read(ctx->buffer, JpegPumpCtx::kBufferSize);
       ctx->bufferPos = 0;
       if (readResult <= 0) {
         ctx->bufferFilled = 0;
@@ -114,7 +114,7 @@ int32_t jpegSeek(JPEGFILE* pFile, int32_t iPosition) {
     // No-op seek; pump buffer is still valid.
     return 1;
   }
-    if (!ctx->file->seek(static_cast<uint64_t>(iPosition))) return 0;
+  if (!ctx->file->seek(static_cast<uint64_t>(iPosition))) return 0;
   // Invalidate pump buffer so subsequent reads refill from the new offset.
   ctx->bufferPos = 0;
   ctx->bufferFilled = 0;
@@ -155,13 +155,13 @@ void writeBmpHeader1bit(Print& bmpOut, const int width, const int height) {
   bmpOut.write('M');
   write32(bmpOut, fileSize);
   write32(bmpOut, 0);
-  write32(bmpOut, 62);            // pixel data offset (14 + 40 + 8)
+  write32(bmpOut, 62);  // pixel data offset (14 + 40 + 8)
 
-  write32(bmpOut, 40);            // BITMAPINFOHEADER size
+  write32(bmpOut, 40);  // BITMAPINFOHEADER size
   write32Signed(bmpOut, width);
-  write32Signed(bmpOut, -height); // negative height = top-down
+  write32Signed(bmpOut, -height);  // negative height = top-down
   write16(bmpOut, 1);
-  write16(bmpOut, 1);             // 1 bpp
+  write16(bmpOut, 1);  // 1 bpp
   write32(bmpOut, 0);
   write32(bmpOut, imageSize);
   write32(bmpOut, 2835);
@@ -171,8 +171,7 @@ void writeBmpHeader1bit(Print& bmpOut, const int width, const int height) {
 
   // 2-color palette: 0 = black, 1 = white.
   uint8_t palette[8] = {
-      0x00, 0x00, 0x00, 0x00,
-      0xFF, 0xFF, 0xFF, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00,
   };
   for (const uint8_t b : palette) bmpOut.write(b);
 }
@@ -187,13 +186,13 @@ void writeBmpHeader2bit(Print& bmpOut, const int width, const int height) {
   bmpOut.write('M');
   write32(bmpOut, fileSize);
   write32(bmpOut, 0);
-  write32(bmpOut, 70);            // pixel data offset
+  write32(bmpOut, 70);  // pixel data offset
 
   write32(bmpOut, 40);
   write32Signed(bmpOut, width);
   write32Signed(bmpOut, -height);
   write16(bmpOut, 1);
-  write16(bmpOut, 2);             // 2 bpp
+  write16(bmpOut, 2);  // 2 bpp
   write32(bmpOut, 0);
   write32(bmpOut, imageSize);
   write32(bmpOut, 2835);
@@ -205,10 +204,7 @@ void writeBmpHeader2bit(Print& bmpOut, const int width, const int height) {
   // Same palette as the legacy TJpgDec converter so cached BMPs render
   // identically across decoder swaps.
   uint8_t palette[16] = {
-      0x00, 0x00, 0x00, 0x00,
-      0x55, 0x55, 0x55, 0x00,
-      0xAA, 0xAA, 0xAA, 0x00,
-      0xFF, 0xFF, 0xFF, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x55, 0x55, 0x55, 0x00, 0xAA, 0xAA, 0xAA, 0x00, 0xFF, 0xFF, 0xFF, 0x00,
   };
   for (const uint8_t b : palette) bmpOut.write(b);
 }
@@ -224,12 +220,12 @@ void writeBmpHeader2bit(Print& bmpOut, const int width, const int height) {
 // BMP's bit ordering.
 struct DrawCtx {
   Print* bmpOut;
-  uint8_t* rowBuffer;     // current BMP row being assembled
-  int outWidth;           // final image width (post hardware scale)
-  int outHeight;          // final image height
-  int bytesPerRow;        // bytes per packed BMP row
-  int bitsPerPixel;       // 1 or 2
-  int currentY;           // y of the row currently in rowBuffer (-1 = none yet)
+  uint8_t* rowBuffer;  // current BMP row being assembled
+  int outWidth;        // final image width (post hardware scale)
+  int outHeight;       // final image height
+  int bytesPerRow;     // bytes per packed BMP row
+  int bitsPerPixel;    // 1 or 2
+  int currentY;        // y of the row currently in rowBuffer (-1 = none yet)
   bool oneBit;
   bool writeError;
 
@@ -240,7 +236,7 @@ struct DrawCtx {
 
 // Flush a single BMP row from rowBuffer to the output stream and zero it out.
 bool flushRow(DrawCtx& ctx) {
-    if (ctx.bmpOut->write(ctx.rowBuffer, ctx.bytesPerRow) != static_cast<size_t>(ctx.bytesPerRow)) {
+  if (ctx.bmpOut->write(ctx.rowBuffer, ctx.bytesPerRow) != static_cast<size_t>(ctx.bytesPerRow)) {
     LOG_ERR(TAG, "Failed to write BMP row");
     ctx.writeError = true;
     return false;
@@ -329,8 +325,7 @@ int jpegDraw(JPEGDRAW* pDraw) {
   // pDraw->iWidth is the chunk's packing pitch — every row in pPixels starts
   // every (iWidth + 3)/4 bytes for 2bpp, or (iWidth + 7)/8 bytes for 1bpp.
   const int packPitchPx = pDraw->iWidth;
-  const int srcPitchBytes = (ctx->bitsPerPixel == 1) ? ((packPitchPx + 7) >> 3)
-                                                      : ((packPitchPx + 3) >> 2);
+  const int srcPitchBytes = (ctx->bitsPerPixel == 1) ? ((packPitchPx + 7) >> 3) : ((packPitchPx + 3) >> 2);
 
   const auto* srcBytes = reinterpret_cast<const uint8_t*>(pDraw->pPixels);
 
@@ -372,7 +367,7 @@ int jpegDraw(JPEGDRAW* pDraw) {
 // resulting decoded dimensions still meet or exceed the target box.  Returns
 // the JPEGDEC scale option bit (0 = no scale) and the resulting decoded W/H.
 struct ScaleResult {
-  int option;     // 0 / JPEG_SCALE_HALF / JPEG_SCALE_QUARTER / JPEG_SCALE_EIGHTH
+  int option;  // 0 / JPEG_SCALE_HALF / JPEG_SCALE_QUARTER / JPEG_SCALE_EIGHTH
   int outWidth;
   int outHeight;
 };
@@ -433,16 +428,11 @@ bool decodeImpl(HalFile& jpegFile, Print& bmpOut, int targetMaxW, int targetMaxH
   // Heap-allocate the pump buffer (4 KB — bigger than the BG worker stack).
   std::unique_ptr<uint8_t[]> pumpBuf(new (std::nothrow) uint8_t[JpegPumpCtx::kBufferSize]);
   if (!pumpBuf) {
-    LOG_ERR(TAG, "JPEG OOM allocating %u-byte pump buffer",
-            static_cast<unsigned>(JpegPumpCtx::kBufferSize));
+    LOG_ERR(TAG, "JPEG OOM allocating %u-byte pump buffer", static_cast<unsigned>(JpegPumpCtx::kBufferSize));
     return false;
   }
 
-  JpegPumpCtx pump = {.file = &jpegFile,
-                      .buffer = pumpBuf.get(),
-                      .bufferPos = 0,
-                      .bufferFilled = 0,
-                      .streamPos = 0};
+  JpegPumpCtx pump = {.file = &jpegFile, .buffer = pumpBuf.get(), .bufferPos = 0, .bufferFilled = 0, .streamPos = 0};
 
   // Heap-allocate the JPEGIMAGE workspace — `JPEGIMAGE` is ~50 KB, far
   // bigger than the 16 KB BG worker stack would tolerate.
@@ -480,8 +470,7 @@ bool decodeImpl(HalFile& jpegFile, Print& bmpOut, int targetMaxW, int targetMaxH
   constexpr int MAX_IMAGE_WIDTH = 2048;
   constexpr int MAX_IMAGE_HEIGHT = 3072;
   if (srcW > MAX_IMAGE_WIDTH || srcH > MAX_IMAGE_HEIGHT) {
-    LOG_ERR(TAG, "JPEG too large (%dx%d), max supported: %dx%d", srcW, srcH, MAX_IMAGE_WIDTH,
-            MAX_IMAGE_HEIGHT);
+    LOG_ERR(TAG, "JPEG too large (%dx%d), max supported: %dx%d", srcW, srcH, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT);
     jpeg->close();
     return false;
   }
@@ -511,8 +500,7 @@ bool decodeImpl(HalFile& jpegFile, Print& bmpOut, int targetMaxW, int targetMaxH
   const size_t ditherBufSize = static_cast<size_t>((outWidth + 32) * 16 + 16);
   std::unique_ptr<uint8_t[]> ditherBuf(new (std::nothrow) uint8_t[ditherBufSize]);
   if (!ditherBuf) {
-    LOG_ERR(TAG, "JPEG OOM allocating %u-byte dither buffer",
-            static_cast<unsigned>(ditherBufSize));
+    LOG_ERR(TAG, "JPEG OOM allocating %u-byte dither buffer", static_cast<unsigned>(ditherBufSize));
     jpeg->close();
     return false;
   }
@@ -529,7 +517,6 @@ bool decodeImpl(HalFile& jpegFile, Print& bmpOut, int targetMaxW, int targetMaxH
 
   // Write BMP header.
   {
-
     if (oneBit) {
       writeBmpHeader1bit(bmpOut, outWidth, outHeight);
     } else {
@@ -584,7 +571,6 @@ bool decodeImpl(HalFile& jpegFile, Print& bmpOut, int targetMaxW, int targetMaxH
 // nothing inside this file references it; the decoder uses its own pump
 // callbacks (jpegRead/jpegSeek) above.
 
-
 bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& bmpOut, int targetWidth,
                                                      int targetHeight, bool oneBit, bool /*quickMode*/,
                                                      const std::function<bool()>& shouldAbort) {
@@ -600,15 +586,14 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& b
 namespace {
 constexpr int kDefaultTargetW = 450;
 constexpr int kDefaultTargetH = 750;
-}
+}  // namespace
 
 bool JpegToBmpConverter::jpegFileToBmpStream(HalFile& jpegFile, Print& bmpOut, bool crop) {
   return decodeImpl(jpegFile, bmpOut, kDefaultTargetW, kDefaultTargetH, /*oneBit=*/false, nullptr);
 }
 
 bool JpegToBmpConverter::jpegFileToBmpStreamWithSize(HalFile& jpegFile, Print& bmpOut, int targetMaxWidth,
-                                                     int targetMaxHeight,
-                                                     const std::function<bool()>& shouldAbort) {
+                                                     int targetMaxHeight, const std::function<bool()>& shouldAbort) {
   return decodeImpl(jpegFile, bmpOut, targetMaxWidth, targetMaxHeight, /*oneBit=*/false, shouldAbort);
 }
 
@@ -616,14 +601,13 @@ bool JpegToBmpConverter::jpegFileTo1BitBmpStream(HalFile& jpegFile, Print& bmpOu
   return decodeImpl(jpegFile, bmpOut, kDefaultTargetW, kDefaultTargetH, /*oneBit=*/true, nullptr);
 }
 
-bool JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(HalFile& jpegFile, Print& bmpOut,
-                                                         int targetMaxWidth, int targetMaxHeight) {
+bool JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(HalFile& jpegFile, Print& bmpOut, int targetMaxWidth,
+                                                         int targetMaxHeight) {
   return decodeImpl(jpegFile, bmpOut, targetMaxWidth, targetMaxHeight, /*oneBit=*/true, nullptr);
 }
 
 bool JpegToBmpConverter::jpegFileToBmpStreamQuick(HalFile& jpegFile, Print& bmpOut, int targetMaxWidth,
-                                                  int targetMaxHeight,
-                                                  const std::function<bool()>& shouldAbort) {
+                                                  int targetMaxHeight, const std::function<bool()>& shouldAbort) {
   // No separate "quick" pipeline under JPEGDEC — Floyd-Steinberg dithering is
   // baked into the decode loop and effectively free.  Same code path as
   // jpegFileToBmpStreamWithSize.
@@ -648,11 +632,7 @@ bool JpegToBmpConverter::peekDimensions(HalFile& jpegFile, int& outWidth, int& o
   std::unique_ptr<uint8_t[]> pumpBuf(new (std::nothrow) uint8_t[JpegPumpCtx::kBufferSize]);
   if (!pumpBuf) return false;
 
-  JpegPumpCtx pump = {.file = &jpegFile,
-                      .buffer = pumpBuf.get(),
-                      .bufferPos = 0,
-                      .bufferFilled = 0,
-                      .streamPos = 0};
+  JpegPumpCtx pump = {.file = &jpegFile, .buffer = pumpBuf.get(), .bufferPos = 0, .bufferFilled = 0, .streamPos = 0};
 
   std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
   if (!jpeg) return false;
@@ -695,11 +675,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamPreview(HalFile& jpegFile, Print& bm
 
   std::unique_ptr<uint8_t[]> pumpBuf(new (std::nothrow) uint8_t[JpegPumpCtx::kBufferSize]);
   if (!pumpBuf) return false;
-  JpegPumpCtx pump = {.file = &jpegFile,
-                      .buffer = pumpBuf.get(),
-                      .bufferPos = 0,
-                      .bufferFilled = 0,
-                      .streamPos = 0};
+  JpegPumpCtx pump = {.file = &jpegFile, .buffer = pumpBuf.get(), .bufferPos = 0, .bufferFilled = 0, .streamPos = 0};
 
   std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
   if (!jpeg) {
@@ -749,7 +725,6 @@ bool JpegToBmpConverter::jpegFileToBmpStreamPreview(HalFile& jpegFile, Print& bm
   memset(rowBuf.get(), 0, bytesPerRow);
 
   {
-    
     writeBmpHeader2bit(bmpOut, outW, outH);
   }
 

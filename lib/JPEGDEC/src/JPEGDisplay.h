@@ -19,28 +19,28 @@
 #ifndef __JPEGDISPLAY__
 #define __JPEGDISPLAY__
 #include <JPEGDEC.h>
-#include <bb_spi_lcd.h>
-#include <SD.h>
-#include "FS.h"
 #include <LittleFS.h>
+#include <SD.h>
+#include <bb_spi_lcd.h>
+
+#include "FS.h"
 
 // To center one or both coordinates for the drawing position
 //  use this constant value
 #define JPEGDISPLAY_CENTER -2
 
-class JPEGDisplay
-{
-  public:
-    int loadJPEG(BB_SPI_LCD *pLCD, int x, int y, const void *pData, int iDataSize, int iOptions = 0);
-    int loadJPEG(BB_SPI_LCD *pLCD, int x, int y, const char *fname, int iOptions = 0);
-    int loadJPEG_LFS(BB_SPI_LCD *pLCD, int x, int y, const char *fname, int iOptions = 0);
-    int getJPEGInfo(int *width, int *height, int *bpp, const void *pData, int iDataSize);
-    int getJPEGInfo(int *width, int *height, int *bpp, const char *fname);
-    int getJPEGInfo_LFS(int *width, int *height, int *bpp, const char *fname);
-    int getLastError() {return _iLastError;}
+class JPEGDisplay {
+ public:
+  int loadJPEG(BB_SPI_LCD* pLCD, int x, int y, const void* pData, int iDataSize, int iOptions = 0);
+  int loadJPEG(BB_SPI_LCD* pLCD, int x, int y, const char* fname, int iOptions = 0);
+  int loadJPEG_LFS(BB_SPI_LCD* pLCD, int x, int y, const char* fname, int iOptions = 0);
+  int getJPEGInfo(int* width, int* height, int* bpp, const void* pData, int iDataSize);
+  int getJPEGInfo(int* width, int* height, int* bpp, const char* fname);
+  int getJPEGInfo_LFS(int* width, int* height, int* bpp, const char* fname);
+  int getLastError() { return _iLastError; }
 
-  private:
-    int _iLastError;
+ private:
+  int _iLastError;
 };
 
-#endif // __JPEGDISPLAY__
+#endif  // __JPEGDISPLAY__
