@@ -633,10 +633,11 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     }
   } else {
     // No book to continue reading
-    const int y =
-        bookY + (bookHeight - renderer.getLineHeight(UI_12_FONT_ID) - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+    const int ui12LineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int ui10LineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const int y = bookY + (bookHeight - ui12LineHeight - ui10LineHeight) / 2;
     renderer.drawCenteredText(UI_12_FONT_ID, y, "No open book");
-    renderer.drawCenteredText(UI_10_FONT_ID, y + renderer.getLineHeight(UI_12_FONT_ID), "Start reading below");
+    renderer.drawCenteredText(UI_10_FONT_ID, y + ui12LineHeight, "Start reading below");
   }
 }
 
