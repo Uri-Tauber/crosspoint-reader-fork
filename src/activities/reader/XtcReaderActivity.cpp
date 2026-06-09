@@ -75,7 +75,7 @@ void XtcReaderActivity::loop() {
   // Short press BACK goes directly to home
   if (mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       mappedInput.getHeldTime() < ReaderUtils::GO_HOME_MS) {
-    onGoHome();
+    activityManager.goHome();
     return;
   }
 
@@ -87,7 +87,7 @@ void XtcReaderActivity::loop() {
   // At end of the book, forward button goes home and back button returns to last page
   if (currentPage >= xtc->getPageCount()) {
     if (nextTriggered) {
-      onGoHome();
+      activityManager.goHome();
     } else {
       currentPage = xtc->getPageCount() - 1;
       requestUpdate();

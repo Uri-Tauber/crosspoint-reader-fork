@@ -72,7 +72,7 @@ void RecentBooksActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    onGoHome();
+    activityManager.goHome();
   }
 
   int listSize = static_cast<int>(recentBooks.size());

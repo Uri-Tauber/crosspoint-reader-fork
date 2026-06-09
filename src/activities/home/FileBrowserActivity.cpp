@@ -297,7 +297,7 @@ void FileBrowserActivity::loop() {
         setResult(std::move(res));
         finish();
       } else {
-        onGoHome();
+        activityManager.goHome();
       }
     }
   }
