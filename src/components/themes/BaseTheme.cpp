@@ -283,12 +283,14 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     int rowTextWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2;
     std::string valueText;
+    int cachedValueTextWidth = 0;
     if (rowValue != nullptr) {
       valueText = rowValue(i);
       if (!valueText.empty()) {
         int maxValW = std::max(0, rowTextWidth - 40 - minValueGap);
         valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxValW);
-        int valueWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + minValueGap;
+        cachedValueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
+        int valueWidth = cachedValueTextWidth + minValueGap;
         rowTextWidth -= valueWidth;
       }
     }
@@ -318,7 +320,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     }
 
     if (!valueText.empty()) {
-      const auto valueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
+      const auto valueTextWidth = cachedValueTextWidth;
       int valueY = itemY;
       if (rowSubtitle != nullptr) {
         valueY = itemY + 10;
