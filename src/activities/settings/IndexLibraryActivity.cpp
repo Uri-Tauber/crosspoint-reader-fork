@@ -69,8 +69,7 @@ void IndexLibraryActivity::render(RenderLock&&) {
   if (state == SUCCESS) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 30, tr(STR_LIBRARY_INDEXED), true, EpdFontFamily::BOLD);
 
-    std::string resultText =
-        std::to_string(indexedChapters) + " " + std::string(tr(STR_CHAPTERS_INDEXED));
+    std::string resultText = std::to_string(indexedChapters) + " " + std::string(tr(STR_CHAPTERS_INDEXED));
     if (skippedChapters > 0) {
       resultText += ", " + std::to_string(skippedChapters) + " " + std::string(tr(STR_ALREADY_CACHED));
     }
@@ -108,8 +107,8 @@ void IndexLibraryActivity::computeViewport(uint16_t& outWidth, uint16_t& outHeig
   orientedMarginTop += SETTINGS.screenMargin;
   orientedMarginLeft += SETTINGS.screenMargin;
   orientedMarginRight += SETTINGS.screenMargin;
-  orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin),
-                                   static_cast<int>(UITheme::getInstance().getStatusBarHeight()));
+  orientedMarginBottom +=
+      std::max(static_cast<int>(SETTINGS.screenMargin), static_cast<int>(UITheme::getInstance().getStatusBarHeight()));
 
   outWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
   outHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
