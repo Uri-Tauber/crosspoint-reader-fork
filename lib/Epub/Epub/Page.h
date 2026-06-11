@@ -2,6 +2,7 @@
 #include <HalStorage.h>
 
 #include <algorithm>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>

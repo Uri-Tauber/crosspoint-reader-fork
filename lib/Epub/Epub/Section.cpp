@@ -251,7 +251,9 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   if (estimate > 128 * 1024) estimate = 128 * 1024;
 
   size_t available = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  if (estimate > available - 8192) {
+  if (available <= 8192) {
+    estimate = 16 * 1024;  // Ensure we don't underflow, but arena creation will likely fail
+  } else if (estimate > available - 8192) {
     estimate = available - 8192;
   }
 
@@ -259,7 +261,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   if (parse_arena) {
     parse_arena_activate(parse_arena);
   } else {
-    LOG_ERR("SCT", "Could not allocate parse arena of size %u", estimate);
+    LOG_ERR("SCT", "Could not allocate parse arena of size %zu", estimate);
   }
 
   success = visitor.parseAndBuildPages();
