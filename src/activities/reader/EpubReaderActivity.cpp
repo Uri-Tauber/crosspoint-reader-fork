@@ -123,6 +123,10 @@ void EpubReaderActivity::onEnter() {
     return;
   }
 
+  epub_arenas_init(&arenas);
+  global_epub_context = &arenas;
+  epub->setArenas(&arenas);
+
   // Configure screen orientation based on settings
   // NOTE: This affects layout math and must be applied before any render calls.
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
@@ -170,6 +174,8 @@ void EpubReaderActivity::onEnter() {
 }
 
 void EpubReaderActivity::onExit() {
+  epub_arenas_cleanup(&arenas);
+  global_epub_context = nullptr;
   Activity::onExit();
 
   // Reset orientation back to portrait for the rest of the UI

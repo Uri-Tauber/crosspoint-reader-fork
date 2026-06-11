@@ -171,7 +171,7 @@ bool Epub::parseTocNcxFile() const {
     return false;
   }
 
-  const auto ncxBuffer = static_cast<uint8_t*>(malloc(1024));
+  const auto ncxBuffer = arenas ? (uint8_t*)epub_alloc_fallback(arenas, 1024, &arenas->spine_arena) : static_cast<uint8_t*>(malloc(1024));
   if (!ncxBuffer) {
     LOG_ERR("EBP", "Could not allocate memory for toc ncx parser");
     return false;
@@ -184,12 +184,12 @@ bool Epub::parseTocNcxFile() const {
 
     if (processedSize != readSize) {
       LOG_ERR("EBP", "Could not process all toc ncx data");
-      free(ncxBuffer);
+      if (!arenas) if (!arenas) free(ncxBuffer);
       return false;
     }
   }
 
-  free(ncxBuffer);
+  if (!arenas) if (!arenas) free(ncxBuffer);
   // Explicitly close() file before calling Storage.remove()
   tempNcxFile.close();
   Storage.remove(tmpNcxPath.c_str());
@@ -230,7 +230,7 @@ bool Epub::parseTocNavFile() const {
     return false;
   }
 
-  const auto navBuffer = static_cast<uint8_t*>(malloc(1024));
+  const auto navBuffer = arenas ? (uint8_t*)epub_alloc_fallback(arenas, 1024, &arenas->spine_arena) : static_cast<uint8_t*>(malloc(1024));
   if (!navBuffer) {
     LOG_ERR("EBP", "Could not allocate memory for toc nav parser");
     return false;
@@ -242,12 +242,12 @@ bool Epub::parseTocNavFile() const {
 
     if (processedSize != readSize) {
       LOG_ERR("EBP", "Could not process all toc nav data");
-      free(navBuffer);
+      if (!arenas) if (!arenas) free(navBuffer);
       return false;
     }
   }
 
-  free(navBuffer);
+  if (!arenas) if (!arenas) free(navBuffer);
   // Explicitly close() file before calling Storage.remove()
   tempNavFile.close();
   Storage.remove(tmpNavPath.c_str());

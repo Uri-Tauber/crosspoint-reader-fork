@@ -9,6 +9,7 @@
 
 #include "Epub/BookMetadataCache.h"
 #include "Epub/css/CssParser.h"
+#include "epub_arena.h"
 
 class ZipFile;
 
@@ -29,6 +30,8 @@ class Epub {
   std::unique_ptr<CssParser> cssParser;
   // CSS files
   std::vector<std::string> cssFiles;
+  // Arenas
+  epub_parsing_context_t* arenas = nullptr;
 
   bool findContentOpfFile(std::string* contentOpfFile) const;
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, bool writeSpineEntries = true);
@@ -42,6 +45,8 @@ class Epub {
     // create a cache key based on the filepath
     cachePath = cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
   }
+  void setArenas(epub_parsing_context_t* arenas) { this->arenas = arenas; }
+  epub_parsing_context_t* getArenas() const { return arenas; }
   ~Epub() = default;
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);

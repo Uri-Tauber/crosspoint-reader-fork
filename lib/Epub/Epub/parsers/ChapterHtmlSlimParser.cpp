@@ -1,3 +1,4 @@
+#include "ExpatArenaAlloc.h"
 #include "ChapterHtmlSlimParser.h"
 
 #include <FsHelpers.h>
@@ -1271,7 +1272,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   paragraphAlignmentBlockStyle.alignment = align;
   startNewTextBlock(paragraphAlignmentBlockStyle);
 
-  XML_Parser parser = XML_ParserCreate(nullptr);
+  XML_Parser parser = XML_ParserCreate_MM(nullptr, &expat_arena_mem_suite, nullptr);
   int done;
 
   if (!parser) {

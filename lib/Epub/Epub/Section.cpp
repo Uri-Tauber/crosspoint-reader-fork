@@ -8,6 +8,7 @@
 #include "Page.h"
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
+#include "epub_arena.h"
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION = 26;
@@ -129,6 +130,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
   // Explicit close() required: member variable persists beyond function scope
   file.close();
   LOG_DBG("SCT", "Deserialization succeeded: %d pages", pageCount);
+  epub_arenas_dump_stats(global_epub_context);
   return true;
 }
 
@@ -136,7 +138,8 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
 bool Section::clearCache() const {
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
-    return true;
+    epub_arenas_dump_stats(global_epub_context);
+  return true;
   }
 
   if (!Storage.remove(filePath.c_str())) {
@@ -145,6 +148,7 @@ bool Section::clearCache() const {
   }
 
   LOG_DBG("SCT", "Cache cleared successfully");
+  epub_arenas_dump_stats(global_epub_context);
   return true;
 }
 
@@ -307,6 +311,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   if (cssParser) {
     cssParser->clear();
   }
+  epub_arenas_dump_stats(global_epub_context);
   return true;
 }
 

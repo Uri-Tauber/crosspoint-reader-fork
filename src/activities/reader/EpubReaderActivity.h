@@ -38,6 +38,7 @@ class EpubReaderActivity final : public Activity {
   // removeReadBooksFromRecents feature (set at End-of-Book, cleared if paged back in).
   bool recentsEntryRemoved = false;
   unsigned long bookmarkMessageTime = 0UL;
+  epub_parsing_context_t arenas;
   // Set when the reader is left at end-of-book and SETTINGS.moveFinishedToReadFolder is on.
   // Consumed in onExit() to relocate the finished book into /Read/.
   bool pendingReadFolderMove = false;
@@ -71,7 +72,7 @@ class EpubReaderActivity final : public Activity {
 
  public:
   explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)
-      : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)) {}
+      : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)), arenas() {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

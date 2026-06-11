@@ -1,10 +1,11 @@
+#include "ExpatArenaAlloc.h"
 #include "ContainerParser.h"
 
 #include <Logging.h>
 #include <XmlParserUtils.h>
 
 bool ContainerParser::setup() {
-  parser = XML_ParserCreate(nullptr);
+  parser = XML_ParserCreate_MM(nullptr, &expat_arena_mem_suite, nullptr);
   if (!parser) {
     LOG_ERR("CTR", "Couldn't allocate memory for parser");
     return false;
