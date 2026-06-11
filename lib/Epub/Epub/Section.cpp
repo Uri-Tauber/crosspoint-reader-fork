@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include "Epub/css/CssParser.h"
@@ -205,7 +206,6 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   }
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled);
-  std::vector<PageLutEntry> lut = {};
 
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = localPath.find_last_of('/');
@@ -235,22 +235,13 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     }
   }
 
-  ChapterHtmlSlimParser visitor(
-      epub, tmpHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-      viewportHeight, hyphenationEnabled, focusReadingEnabled,
-      [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
-        lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
-      },
-      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), popupFn, cssParser);
-  Hyphenator::setPreferredLanguage(epub->getLanguage());
-
-  // Scope an arena for Expat's internal allocations during XML parsing.
-  // Size heuristic: ~3x the HTML file size covers Expat's parse tree, with a floor/ceiling.
-  // Only allocate if we can keep at least 32KB free for Page/vector allocations during parsing.
+  // Arena scopes all heap allocations during parsing + serialization.
+  // Declared before lut/visitor so destruction order is: visitor → lut → guard → arena.
+  // The guard deactivates the arena after lut/visitor are destroyed but while the buffer is still valid.
   arena_t parseArena = {};
-  size_t arenaSize = static_cast<size_t>(fileSize) * 3;
-  if (arenaSize < 16 * 1024) arenaSize = 16 * 1024;
-  if (arenaSize > 96 * 1024) arenaSize = 96 * 1024;
+  size_t arenaSize = static_cast<size_t>(fileSize) * 4;
+  if (arenaSize < 32 * 1024) arenaSize = 32 * 1024;
+  if (arenaSize > 128 * 1024) arenaSize = 128 * 1024;
 
   const size_t freeHeap = ESP.getFreeHeap();
   constexpr size_t HEAP_RESERVE = 32 * 1024;
@@ -262,14 +253,30 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     LOG_DBG("SCT", "Skipping arena: free heap %zu, need %zu + %zu reserve", freeHeap, arenaSize, HEAP_RESERVE);
   }
 
-  success = visitor.parseAndBuildPages();
+  // Guard deactivates + destroys the arena when it goes out of scope.
+  // Declared after parseArena (destroyed before it) but before lut/visitor (destroyed after them).
+  // Destruction order: visitor → lut → arenaGuard(deactivate+destroy) → parseArena(POD, no-op).
+  ScopedCleanup arenaGuard{[&parseArena] {
+    if (parseArena.buffer) {
+      LOG_DBG("SCT", "Parse arena: %zu/%zu bytes used (peak %d%%)", arena_used(&parseArena),
+              arena_capacity(&parseArena), arena_peak_percent(&parseArena));
+      epub_arena_deactivate();
+      arena_destroy(&parseArena);
+    }
+  }};
 
-  if (parseArena.buffer) {
-    LOG_DBG("SCT", "Parse arena: %zu/%zu bytes used (peak %d%%)", arena_used(&parseArena), arena_capacity(&parseArena),
-            arena_peak_percent(&parseArena));
-    epub_arena_deactivate();
-    arena_destroy(&parseArena);
-  }
+  std::vector<PageLutEntry> lut = {};
+
+  ChapterHtmlSlimParser visitor(
+      epub, tmpHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+      viewportHeight, hyphenationEnabled, focusReadingEnabled,
+      [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
+        lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
+      },
+      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), popupFn, cssParser);
+  Hyphenator::setPreferredLanguage(epub->getLanguage());
+
+  success = visitor.parseAndBuildPages();
 
   Storage.remove(tmpHtmlPath.c_str());
   if (!success) {
@@ -280,7 +287,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     if (cssParser) {
       cssParser->clear();
     }
-    return false;
+    return false;  // arenaGuard handles cleanup in correct destruction order
   }
 
   const uint32_t lutOffset = file.position();
