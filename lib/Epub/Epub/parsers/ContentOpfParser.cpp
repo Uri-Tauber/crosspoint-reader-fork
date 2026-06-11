@@ -8,6 +8,7 @@
 #include <cctype>
 
 #include "Epub/BookMetadataCache.h"
+#include "ExpatArenaAlloc.h"
 
 namespace {
 constexpr char MEDIA_TYPE_NCX[] = "application/x-dtbncx+xml";
@@ -33,7 +34,7 @@ bool startsWithImageMediaType(const std::string& mediaType) {
 }  // namespace
 
 bool ContentOpfParser::setup() {
-  parser = XML_ParserCreate(nullptr);
+  parser = XML_ParserCreate_MM(nullptr, &expat_arena_mem_suite, nullptr);
   if (!parser) {
     LOG_DBG("COF", "Couldn't allocate memory for parser");
     return false;

@@ -5,9 +5,10 @@
 #include <XmlParserUtils.h>
 
 #include "Epub/BookMetadataCache.h"
+#include "ExpatArenaAlloc.h"
 
 bool TocNavParser::setup() {
-  parser = XML_ParserCreate(nullptr);
+  parser = XML_ParserCreate_MM(nullptr, &expat_arena_mem_suite, nullptr);
   if (!parser) {
     LOG_DBG("NAV", "Couldn't allocate memory for parser");
     return false;

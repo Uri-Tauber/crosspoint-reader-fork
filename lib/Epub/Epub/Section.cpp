@@ -6,6 +6,7 @@
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
+#include "epub_arena.h"
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
 
@@ -242,7 +243,33 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
       },
       embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), popupFn, cssParser);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
+
+  // Scope an arena for Expat's internal allocations during XML parsing.
+  // Size heuristic: ~3x the HTML file size covers Expat's parse tree, with a floor/ceiling.
+  // Only allocate if we can keep at least 32KB free for Page/vector allocations during parsing.
+  arena_t parseArena = {};
+  size_t arenaSize = static_cast<size_t>(fileSize) * 3;
+  if (arenaSize < 16 * 1024) arenaSize = 16 * 1024;
+  if (arenaSize > 96 * 1024) arenaSize = 96 * 1024;
+
+  const size_t freeHeap = ESP.getFreeHeap();
+  constexpr size_t HEAP_RESERVE = 32 * 1024;
+  if (freeHeap > arenaSize + HEAP_RESERVE) {
+    if (arena_create(&parseArena, arenaSize, "epub-parse")) {
+      epub_arena_activate(&parseArena);
+    }
+  } else {
+    LOG_DBG("SCT", "Skipping arena: free heap %zu, need %zu + %zu reserve", freeHeap, arenaSize, HEAP_RESERVE);
+  }
+
   success = visitor.parseAndBuildPages();
+
+  if (parseArena.buffer) {
+    LOG_DBG("SCT", "Parse arena: %zu/%zu bytes used (peak %d%%)", arena_used(&parseArena), arena_capacity(&parseArena),
+            arena_peak_percent(&parseArena));
+    epub_arena_deactivate();
+    arena_destroy(&parseArena);
+  }
 
   Storage.remove(tmpHtmlPath.c_str());
   if (!success) {
