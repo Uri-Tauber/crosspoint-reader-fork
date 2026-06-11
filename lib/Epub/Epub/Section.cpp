@@ -6,8 +6,10 @@
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
+#include "esp_heap_caps.h"
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
+#include "parsers/ParseArena.h"
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION = 26;
@@ -242,7 +244,32 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
       },
       embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), popupFn, cssParser);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
+
+  // Set up arena for parsing
+  size_t estimate = fileSize * 3;
+  if (estimate < 16 * 1024) estimate = 16 * 1024;
+  if (estimate > 128 * 1024) estimate = 128 * 1024;
+
+  size_t available = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  if (estimate > available - 8192) {
+    estimate = available - 8192;
+  }
+
+  arena_t* parse_arena = arena_create(estimate);
+  if (parse_arena) {
+    parse_arena_activate(parse_arena);
+  } else {
+    LOG_ERR("SCT", "Could not allocate parse arena of size %u", estimate);
+  }
+
   success = visitor.parseAndBuildPages();
+
+  if (parse_arena) {
+    LOG_DBG("SCT", "Parse arena: used %u / %u bytes (peak: %u)", arena_used(parse_arena), arena_capacity(parse_arena),
+            arena_peak_used(parse_arena));
+    parse_arena_deactivate();
+    arena_destroy(parse_arena);
+  }
 
   Storage.remove(tmpHtmlPath.c_str());
   if (!success) {

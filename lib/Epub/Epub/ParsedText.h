@@ -12,6 +12,7 @@
 
 class GfxRenderer;
 
+#include "parsers/ParseArena.h"
 class ParsedText {
   std::vector<std::string> words;
   std::vector<EpdFontFamily::Style> wordStyles;
@@ -45,6 +46,11 @@ class ParsedText {
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
 
  public:
+  void* operator new(size_t size) { return parse_malloc(size); }
+  void* operator new(size_t size, const std::nothrow_t&) noexcept { return parse_malloc(size); }
+  void operator delete(void* ptr) { parse_free(ptr); }
+  void operator delete(void* ptr, const std::nothrow_t&) noexcept { parse_free(ptr); }
+
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
                       const bool focusReadingEnabled = false, const BlockStyle& blockStyle = BlockStyle())
       : blockStyle(blockStyle),

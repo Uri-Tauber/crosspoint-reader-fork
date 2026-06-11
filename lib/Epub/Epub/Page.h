@@ -17,8 +17,14 @@ enum PageElementTag : uint8_t {
 };
 
 // represents something that has been added to a page
+#include "parsers/ParseArena.h"
 class PageElement {
  public:
+  void* operator new(size_t size) { return parse_malloc(size); }
+  void* operator new(size_t size, const std::nothrow_t&) noexcept { return parse_malloc(size); }
+  void operator delete(void* ptr) { parse_free(ptr); }
+  void operator delete(void* ptr, const std::nothrow_t&) noexcept { parse_free(ptr); }
+
   int16_t xPos;
   int16_t yPos;
   explicit PageElement(const int16_t xPos, const int16_t yPos) : xPos(xPos), yPos(yPos) {}
@@ -72,6 +78,11 @@ class PageHorizontalRule final : public PageElement {
 
 class Page {
  public:
+  void* operator new(size_t size) { return parse_malloc(size); }
+  void* operator new(size_t size, const std::nothrow_t&) noexcept { return parse_malloc(size); }
+  void operator delete(void* ptr) { parse_free(ptr); }
+  void operator delete(void* ptr, const std::nothrow_t&) noexcept { parse_free(ptr); }
+
   // the list of block index and line numbers on this page
   std::vector<std::shared_ptr<PageElement>> elements;
   std::vector<FootnoteEntry> footnotes;

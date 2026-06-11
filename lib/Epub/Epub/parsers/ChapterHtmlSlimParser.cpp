@@ -17,6 +17,7 @@
 #include "Epub/converters/ImageDecoderFactory.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "Epub/htmlEntities.h"
+#include "ParseArena.h"
 
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
@@ -1271,7 +1272,12 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   paragraphAlignmentBlockStyle.alignment = align;
   startNewTextBlock(paragraphAlignmentBlockStyle);
 
-  XML_Parser parser = XML_ParserCreate(nullptr);
+  XML_Memory_Handling_Suite mem = {
+      .malloc_fcn = parse_malloc,
+      .realloc_fcn = parse_realloc,
+      .free_fcn = parse_free,
+  };
+  XML_Parser parser = XML_ParserCreate_MM(nullptr, &mem, nullptr);
   int done;
 
   if (!parser) {
