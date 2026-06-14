@@ -129,8 +129,8 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
 
   // Keep inherited direction in the active empty text block so upcoming block starts
   // can inherit from non-block ancestors such as <html dir="rtl"> / <body dir="rtl">.
-  if (currentTextBlock && currentTextBlock->isEmpty()) {
-    auto& style = currentTextBlock->getBlockStyle();
+  if (textBlockActive && currentTextBlock.isEmpty()) {
+    auto& style = currentTextBlock.getBlockStyle();
     if (effectiveDirectionDefined) {
       style.directionDefined = true;
       style.isRtl = (effectiveDirection == CssTextDirection::Rtl);
@@ -186,7 +186,7 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
 
   // flush the buffer
   partWordBuffer[partWordBufferIndex] = '\0';
-  currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
+  currentTextBlock.addWord(partWordBuffer, fontStyle, false, nextWordContinues);
   partWordBufferIndex = 0;
   nextWordContinues = false;
 }
@@ -194,16 +194,16 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
-  if (currentTextBlock) {
+  if (textBlockActive) {
     // already have a text block running and it is empty - just reuse it
-    if (currentTextBlock->isEmpty()) {
+    if (currentTextBlock.isEmpty()) {
       // The stack accumulates horizontal margins and text properties from ancestors.
       // Vertical margins are per-element and not inherited through the stack, but
       // container elements deposit their vertical margins on the empty block when they
       // open. Merge those into the new style so the first child in a container inherits
       // the container's vertical spacing.
-      const auto style = currentTextBlock->getBlockStyle();
-      currentTextBlock->setBlockStyle(style.getCombinedBlockStyle(blockStyle, BlockStyle::CombineAxis::Vertical));
+      const auto style = currentTextBlock.getBlockStyle();
+      currentTextBlock.setBlockStyle(style.getCombinedBlockStyle(blockStyle, BlockStyle::CombineAxis::Vertical));
 
       flushPendingAnchor();
       return;
@@ -214,7 +214,8 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
   flushPendingAnchor();
-  currentTextBlock.reset(new ParsedText(extraParagraphSpacing, hyphenationEnabled, focusReadingEnabled, blockStyle));
+  currentTextBlock.reset(blockStyle);
+  textBlockActive = true;
   wordsExtractedInBlock = 0;
 }
 
@@ -223,8 +224,8 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
     flushPartWordBuffer();
   }
 
-  if (currentTextBlock) {
-    const BlockStyle parentBlockStyle = currentTextBlock->getBlockStyle();
+  if (textBlockActive) {
+    const BlockStyle parentBlockStyle = currentTextBlock.getBlockStyle();
     startNewTextBlock(parentBlockStyle);
   }
 
@@ -515,8 +516,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 // <div style="margin: 1em 40%">), percentage widths like width:100%
                 // should resolve against the container width, not the full viewport.
                 int containerWidth = self->viewportWidth;
-                if (self->currentTextBlock) {
-                  const int inset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
+                if (self->textBlockActive) {
+                  const int inset = self->currentTextBlock.getBlockStyle().totalHorizontalInset();
                   if (inset > 0 && inset < self->viewportWidth) {
                     containerWidth = self->viewportWidth - inset;
                   }
@@ -601,8 +602,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 if (self->partWordBufferIndex > 0) {
                   self->flushPartWordBuffer();
                 }
-                if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
-                  const BlockStyle parentBlockStyle = self->currentTextBlock->getBlockStyle();
+                if (self->textBlockActive && !self->currentTextBlock.isEmpty()) {
+                  const BlockStyle parentBlockStyle = self->currentTextBlock.getBlockStyle();
                   self->startNewTextBlock(parentBlockStyle);
                 }
 
@@ -612,8 +613,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 // deferred application at element close, so read it from the stack.
                 int16_t imageMarginTop = 0;
                 int16_t imageMarginBottom = 0;
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
-                  const auto& bs = self->currentTextBlock->getBlockStyle();
+                if (self->textBlockActive && self->currentTextBlock.isEmpty()) {
+                  const auto& bs = self->currentTextBlock.getBlockStyle();
                   imageMarginTop = bs.topInset();
                   if (self->blockStyleStack.size() > 1) {
                     imageMarginBottom = self->blockStyleStack.back().bottomInset();
@@ -663,12 +664,12 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 // The image consumed the empty block's accumulated vertical spacing.
                 // Reset the block so the Vertical merge in startNewTextBlock doesn't
                 // re-apply the same margins to the next text paragraph.
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
+                if (self->textBlockActive && self->currentTextBlock.isEmpty()) {
                   BlockStyle resetStyle;
                   resetStyle.alignment = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
                                              ? CssTextAlign::Justify
                                              : static_cast<CssTextAlign>(self->paragraphAlignment);
-                  self->currentTextBlock->setBlockStyle(resetStyle);
+                  self->currentTextBlock.setBlockStyle(resetStyle);
                 }
 
                 self->depth += 1;
@@ -821,7 +822,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       self->updateEffectiveInlineStyle();
 
       if (strcmp(name, "li") == 0) {
-        self->currentTextBlock->addWord("\xe2\x80\xa2", EpdFontFamily::REGULAR);
+        self->currentTextBlock.addWord("\xe2\x80\xa2", EpdFontFamily::REGULAR);
       }
     }
   } else if (matches(name, UNDERLINE_TAGS, std::size(UNDERLINE_TAGS))) {
@@ -1105,13 +1106,13 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   // There should be enough here to build out 1-2 full pages and doing this will free up a lot of
   // memory.
   // Spotted when reading Intermezzo, there are some really long text blocks in there.
-  if (self->currentTextBlock->size() > 750) {
+  if (self->currentTextBlock.size() > 750) {
     LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
-    const int horizontalInset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
+    const int horizontalInset = self->currentTextBlock.getBlockStyle().totalHorizontalInset();
     const uint16_t effectiveWidth = (horizontalInset < self->viewportWidth)
                                         ? static_cast<uint16_t>(self->viewportWidth - horizontalInset)
                                         : self->viewportWidth;
-    self->currentTextBlock->layoutAndExtractLines(
+    self->currentTextBlock.layoutAndExtractLines(
         self->renderer, self->fontId, effectiveWidth,
         [self](const std::shared_ptr<TextBlock>& textBlock) { self->addLineToPage(textBlock); }, false);
   }
@@ -1187,7 +1188,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       strncpy(entry.href, self->currentFootnote.href, sizeof(entry.href) - 1);
       entry.href[sizeof(entry.href) - 1] = '\0';
       int wordIndex =
-          self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
+          self->wordsExtractedInBlock + (self->textBlockActive ? static_cast<int>(self->currentTextBlock.size()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
     }
     self->insideFootnoteLink = false;
@@ -1245,9 +1246,9 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       // Apply closing element's bottom margin to the current text block so
       // container spacing appears after the element's content (on the last child),
       // not on the first child via the empty-block merge in startNewTextBlock.
-      if (self->currentTextBlock) {
-        const auto style = self->currentTextBlock->getBlockStyle();
-        self->currentTextBlock->setBlockStyle(style.addBottom(self->blockStyleStack.back()));
+      if (self->textBlockActive) {
+        const auto style = self->currentTextBlock.getBlockStyle();
+        self->currentTextBlock.setBlockStyle(style.addBottom(self->blockStyleStack.back()));
       }
       self->blockStyleStack.pop_back();
     }
@@ -1335,7 +1336,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   file.close();
 
   // Process last page if there is still text
-  if (currentTextBlock) {
+  if (textBlockActive) {
     makePages();
     if (!pendingAnchorId.empty()) {
       anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
@@ -1344,7 +1345,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
     completedPageCount++;
     currentPage.reset();
-    currentTextBlock.reset();
+    textBlockActive = false;
   }
 
   return true;
@@ -1381,7 +1382,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
 }
 
 void ChapterHtmlSlimParser::makePages() {
-  if (!currentTextBlock) {
+  if (!textBlockActive) {
     LOG_ERR("EHP", "!! No text block to make pages for !!");
     return;
   }
@@ -1394,7 +1395,7 @@ void ChapterHtmlSlimParser::makePages() {
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
   // Apply top spacing before the paragraph (stored in pixels)
-  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
+  const BlockStyle& blockStyle = currentTextBlock.getBlockStyle();
   if (blockStyle.marginTop > 0) {
     currentPageNextY += blockStyle.marginTop;
   }
@@ -1407,7 +1408,7 @@ void ChapterHtmlSlimParser::makePages() {
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
 
-  currentTextBlock->layoutAndExtractLines(
+  currentTextBlock.layoutAndExtractLines(
       renderer, fontId, effectiveWidth,
       [this](const std::shared_ptr<TextBlock>& textBlock) { addLineToPage(textBlock); });
 

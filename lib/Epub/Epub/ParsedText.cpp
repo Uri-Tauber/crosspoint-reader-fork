@@ -121,6 +121,16 @@ bool isWordCharacter(uint32_t cp) {
 
 }  // namespace
 
+void ParsedText::reset(const BlockStyle& newBlockStyle) {
+  words.clear();
+  wordStyles.clear();
+  wordContinues.clear();
+  wordIsFocusSuffix.clear();
+  blockStyle = newBlockStyle;
+  isNaturalAlign = false;
+  hasRtlWord = false;
+}
+
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious) {
   if (word.empty()) return;
@@ -314,24 +324,24 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   }
 
   const int pageWidth = viewportWidth;
-  auto wordWidths = calculateWordWidths(renderer, fontId);
+  calculateWordWidths(renderer, fontId);
 
-  std::vector<size_t> lineBreakIndices;
   if (hyphenationEnabled) {
     // Use greedy layout that can split words mid-loop when a hyphenated prefix fits.
-    lineBreakIndices = computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues);
+    computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidthsScratch, wordContinues);
   } else {
-    lineBreakIndices = computeLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues);
+    computeLineBreaks(renderer, fontId, pageWidth, wordWidthsScratch, wordContinues);
   }
-  const size_t lineCount = includeLastLine ? lineBreakIndices.size() : lineBreakIndices.size() - 1;
+  const size_t lineCount =
+      includeLastLine ? lineBreakIndicesScratch.size() : lineBreakIndicesScratch.size() - 1;
 
   for (size_t i = 0; i < lineCount; ++i) {
-    extractLine(i, pageWidth, wordWidths, wordContinues, lineBreakIndices, processLine, renderer, fontId);
+    extractLine(i, pageWidth, wordWidthsScratch, wordContinues, lineBreakIndicesScratch, processLine, renderer, fontId);
   }
 
   // Remove consumed words so size() reflects only remaining words
   if (lineCount > 0) {
-    const size_t consumed = lineBreakIndices[lineCount - 1];
+    const size_t consumed = lineBreakIndicesScratch[lineCount - 1];
     words.erase(words.begin(), words.begin() + consumed);
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
@@ -339,21 +349,20 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   }
 }
 
-std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {
-  std::vector<uint16_t> wordWidths;
-  wordWidths.reserve(words.size());
+void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {
+  wordWidthsScratch.clear();
+  wordWidthsScratch.reserve(words.size());
 
   for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
+    wordWidthsScratch.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
   }
-
-  return wordWidths;
 }
 
-std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
-                                                  std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec) {
+void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
+                                    std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec) {
+  lineBreakIndicesScratch.clear();
   if (words.empty()) {
-    return {};
+    return;
   }
 
   const int firstLineIndent = resolveFirstLineIndent(true);
@@ -371,18 +380,16 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
   const size_t totalWordCount = words.size();
 
-  // DP table to store the minimum badness (cost) of lines starting at index i
-  std::vector<int> dp(totalWordCount);
-  // 'ans[i]' stores the index 'j' of the *last word* in the optimal line starting at 'i'
-  std::vector<size_t> ans(totalWordCount);
+  dpScratch.resize(totalWordCount);
+  ansScratch.resize(totalWordCount);
 
   // Base Case
-  dp[totalWordCount - 1] = 0;
-  ans[totalWordCount - 1] = totalWordCount - 1;
+  dpScratch[totalWordCount - 1] = 0;
+  ansScratch[totalWordCount - 1] = totalWordCount - 1;
 
   for (int i = totalWordCount - 2; i >= 0; --i) {
     int currlen = 0;
-    dp[i] = MAX_COST;
+    dpScratch[i] = MAX_COST;
 
     // First line has reduced width due to text-indent
     const int effectivePageWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
@@ -414,7 +421,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
       } else {
         const int remainingSpace = effectivePageWidth - currlen;
         // Use long long for the square to prevent overflow
-        const long long cost_ll = static_cast<long long>(remainingSpace) * remainingSpace + dp[j + 1];
+        const long long cost_ll = static_cast<long long>(remainingSpace) * remainingSpace + dpScratch[j + 1];
 
         if (cost_ll > MAX_COST) {
           cost = MAX_COST;
@@ -423,31 +430,29 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
         }
       }
 
-      if (cost < dp[i]) {
-        dp[i] = cost;
-        ans[i] = j;  // j is the index of the last word in this optimal line
+      if (cost < dpScratch[i]) {
+        dpScratch[i] = cost;
+        ansScratch[i] = j;  // j is the index of the last word in this optimal line
       }
     }
 
     // Handle oversized word: if no valid configuration found, force single-word line
     // This prevents cascade failure where one oversized word breaks all preceding words
-    if (dp[i] == MAX_COST) {
-      ans[i] = i;  // Just this word on its own line
+    if (dpScratch[i] == MAX_COST) {
+      ansScratch[i] = i;  // Just this word on its own line
       // Inherit cost from next word to allow subsequent words to find valid configurations
       if (i + 1 < static_cast<int>(totalWordCount)) {
-        dp[i] = dp[i + 1];
+        dpScratch[i] = dpScratch[i + 1];
       } else {
-        dp[i] = 0;
+        dpScratch[i] = 0;
       }
     }
   }
 
-  // Stores the index of the word that starts the next line (last_word_index + 1)
-  std::vector<size_t> lineBreakIndices;
   size_t currentWordIndex = 0;
 
   while (currentWordIndex < totalWordCount) {
-    size_t nextBreakIndex = ans[currentWordIndex] + 1;
+    size_t nextBreakIndex = ansScratch[currentWordIndex] + 1;
 
     // Safety check: prevent infinite loop if nextBreakIndex doesn't advance
     if (nextBreakIndex <= currentWordIndex) {
@@ -455,11 +460,9 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
       nextBreakIndex = currentWordIndex + 1;
     }
 
-    lineBreakIndices.push_back(nextBreakIndex);
+    lineBreakIndicesScratch.push_back(nextBreakIndex);
     currentWordIndex = nextBreakIndex;
   }
-
-  return lineBreakIndices;
 }
 
 void ParsedText::applyParagraphIndent() {
@@ -477,12 +480,11 @@ void ParsedText::applyParagraphIndent() {
 }
 
 // Builds break indices while opportunistically splitting the word that would overflow the current line.
-std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& renderer, const int fontId,
-                                                            const int pageWidth, std::vector<uint16_t>& wordWidths,
-                                                            std::vector<bool>& continuesVec) {
+void ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
+                                             std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec) {
+  lineBreakIndicesScratch.clear();
   const int firstLineIndent = resolveFirstLineIndent(true);
 
-  std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
   bool isFirstLine = true;
 
@@ -540,11 +542,9 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
       --currentIndex;
     }
 
-    lineBreakIndices.push_back(currentIndex);
+    lineBreakIndicesScratch.push_back(currentIndex);
     isFirstLine = false;
   }
-
-  return lineBreakIndices;
 }
 
 // Splits words[wordIndex] into prefix (adding a hyphen only when needed) and remainder when a legal breakpoint fits the
