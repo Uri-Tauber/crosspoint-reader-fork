@@ -957,3 +957,61 @@ void BaseTheme::drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const ch
                       rect.y + metrics.keyboardSecondaryLabelTopPadding, secondaryLabel, !invert);
   }
 }
+
+void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
+                                int selectedIndex) const {
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const auto height10 = renderer.getLineHeight(UI_10_FONT_ID);
+  const auto height12 = renderer.getLineHeight(UI_12_FONT_ID);
+
+  constexpr int itemSpacing = 6;
+  constexpr int innerPadding = 16;
+  constexpr int selectionHPadding = 8;
+  constexpr int selectionVPadding = 4;
+
+  int maxTextWidth = renderer.getTextWidth(UI_12_FONT_ID, title, EpdFontFamily::BOLD);
+  for (const auto& opt : options) {
+    int w = renderer.getTextWidth(UI_10_FONT_ID, opt.c_str(), EpdFontFamily::BOLD);
+    if (w > maxTextWidth) maxTextWidth = w;
+  }
+
+  const int optionCount = options.size();
+  const int listHeight = height10 * optionCount + itemSpacing * (optionCount - 1);
+  const int dialogW = std::min((maxTextWidth + innerPadding * 2 + selectionHPadding * 2) * 12 / 10, pageWidth - 20);
+  const int contentHeight = height12 + 10 + listHeight;
+  const int dialogH = contentHeight + innerPadding * 2;
+  const int dialogX = (pageWidth - dialogW) / 2;
+  const int dialogY = (pageHeight - dialogH) / 2;
+
+  constexpr int border = 2;
+  renderer.fillRect(dialogX - border, dialogY - border, dialogW + border * 2, dialogH + border * 2, true);
+  renderer.fillRect(dialogX, dialogY, dialogW, dialogH, false);
+
+  int y = dialogY + innerPadding;
+
+  renderer.drawCenteredText(UI_12_FONT_ID, y, title, true, EpdFontFamily::BOLD);
+  y += height12 + 10;
+
+  for (int i = 0; i < optionCount; i++) {
+    const int itemY = y + i * (height10 + itemSpacing);
+    const bool selected = (i == selectedIndex);
+    const char* labelText = options[i].c_str();
+    const int labelWidth = renderer.getTextWidth(UI_10_FONT_ID, labelText, EpdFontFamily::BOLD);
+    const int labelX = (pageWidth - labelWidth) / 2;
+
+    Rect itemRect(labelX - selectionHPadding, itemY - selectionVPadding, labelWidth + selectionHPadding * 2,
+                  height10 + selectionVPadding * 2);
+
+    const int textH = renderer.getLineHeight(UI_10_FONT_ID);
+    const int textW = renderer.getTextWidth(UI_10_FONT_ID, labelText, EpdFontFamily::BOLD);
+    const int textY = itemRect.y + (itemRect.height - textH) / 2;
+    const int textX = itemRect.x + (itemRect.width - textW) / 2;
+    if (selected) {
+      renderer.fillRect(itemRect.x, itemRect.y, itemRect.width, itemRect.height);
+      renderer.drawText(UI_10_FONT_ID, textX, textY, labelText, false, EpdFontFamily::BOLD);
+    } else {
+      renderer.drawText(UI_10_FONT_ID, textX, textY, labelText, true, EpdFontFamily::BOLD);
+    }
+  }
+}

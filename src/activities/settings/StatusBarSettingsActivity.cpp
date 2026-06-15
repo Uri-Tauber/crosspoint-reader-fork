@@ -118,6 +118,12 @@ void StatusBarSettingsActivity::onEnter() {
 void StatusBarSettingsActivity::onExit() { Activity::onExit(); }
 
 void StatusBarSettingsActivity::loop() {
+  if (optionPopup.isActive()) {
+    if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) {
+      return;
+    }
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
     return;
@@ -160,21 +166,41 @@ void StatusBarSettingsActivity::handleSelection() {
       SETTINGS.statusBarBookProgressPercentage = (SETTINGS.statusBarBookProgressPercentage + 1) % 2;
       break;
     case ITEM_PROGRESS_BAR:
-      SETTINGS.statusBarProgressBar = (SETTINGS.statusBarProgressBar + 1) % PROGRESS_BAR_ITEMS;
-      break;
+      optionPopup.show(I18N.get(StrId::STR_PROGRESS_BAR),
+                       {I18N.get(progressBarNames[0]), I18N.get(progressBarNames[1]), I18N.get(progressBarNames[2])},
+                       SETTINGS.statusBarProgressBar, [this](int idx) {
+                         SETTINGS.statusBarProgressBar = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_PROGRESS_BAR_THICKNESS:
-      SETTINGS.statusBarProgressBarThickness =
-          (SETTINGS.statusBarProgressBarThickness + 1) % PROGRESS_BAR_THICKNESS_ITEMS;
-      break;
+      optionPopup.show(I18N.get(StrId::STR_PROGRESS_BAR_THICKNESS),
+                       {I18N.get(progressBarThicknessNames[0]), I18N.get(progressBarThicknessNames[1]),
+                        I18N.get(progressBarThicknessNames[2])},
+                       SETTINGS.statusBarProgressBarThickness, [this](int idx) {
+                         SETTINGS.statusBarProgressBarThickness = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_TITLE:
-      SETTINGS.statusBarTitle = (SETTINGS.statusBarTitle + 1) % TITLE_ITEMS;
-      break;
+      optionPopup.show(I18N.get(StrId::STR_TITLE),
+                       {I18N.get(titleNames[0]), I18N.get(titleNames[1]), I18N.get(titleNames[2])},
+                       SETTINGS.statusBarTitle, [this](int idx) {
+                         SETTINGS.statusBarTitle = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_BATTERY:
       SETTINGS.statusBarBattery = (SETTINGS.statusBarBattery + 1) % 2;
       break;
     case ITEM_XTC_STATUS_BAR:
-      SETTINGS.xtcStatusBarMode = (SETTINGS.xtcStatusBarMode + 1) % XTC_STATUS_BAR_ITEMS;
-      break;
+      optionPopup.show(I18N.get(StrId::STR_XTC_STATUS_BAR),
+                       {I18N.get(xtcStatusBarNames[0]), I18N.get(xtcStatusBarNames[1]), I18N.get(xtcStatusBarNames[2])},
+                       SETTINGS.xtcStatusBarMode, [this](int idx) {
+                         SETTINGS.xtcStatusBarMode = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_CLOCK:
       SETTINGS.statusBarClock = (SETTINGS.statusBarClock + 1) % 2;
       break;
@@ -241,8 +267,14 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
       true);
 
   // Draw button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (optionPopup.isActive()) {
+    const auto popupLabels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, popupLabels.btn1, popupLabels.btn2, popupLabels.btn3, popupLabels.btn4);
+    optionPopup.render(renderer);
+  } else {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 
   std::string title;
   if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {

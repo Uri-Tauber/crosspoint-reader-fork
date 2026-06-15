@@ -46,6 +46,12 @@ void EpubReaderMenuActivity::onEnter() {
 void EpubReaderMenuActivity::onExit() { Activity::onExit(); }
 
 void EpubReaderMenuActivity::loop() {
+  if (optionPopup.isActive()) {
+    if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) {
+      return;
+    }
+  }
+
   // Handle navigation
   buttonNavigator.onNext([this] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, static_cast<int>(menuItems.size()));
@@ -60,14 +66,24 @@ void EpubReaderMenuActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     const auto selectedAction = menuItems[selectedIndex].action;
     if (selectedAction == MenuAction::ROTATE_SCREEN) {
-      // Cycle orientation preview locally; actual rotation happens on menu exit.
-      pendingOrientation = (pendingOrientation + 1) % orientationLabels.size();
+      std::vector<std::string> opts;
+      for (auto id : orientationLabels) opts.push_back(I18N.get(id));
+      optionPopup.show(I18N.get(StrId::STR_ORIENTATION), opts, pendingOrientation, [this](int idx) {
+        pendingOrientation = idx;
+        // Cycle orientation preview locally; actual rotation happens on menu exit.
+        requestUpdate();
+      });
       requestUpdate();
       return;
     }
 
     if (selectedAction == MenuAction::AUTO_PAGE_TURN) {
-      selectedPageTurnOption = (selectedPageTurnOption + 1) % pageTurnLabels.size();
+      std::vector<std::string> opts;
+      for (const auto* label : pageTurnLabels) opts.push_back(label);
+      optionPopup.show(I18N.get(StrId::STR_AUTO_TURN_PAGES_PER_MIN), opts, selectedPageTurnOption, [this](int idx) {
+        selectedPageTurnOption = idx;
+        requestUpdate();
+      });
       requestUpdate();
       return;
     }
@@ -128,8 +144,14 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
       true);
 
   // Footer / Hints
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (optionPopup.isActive()) {
+    const auto popupLabels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, popupLabels.btn1, popupLabels.btn2, popupLabels.btn3, popupLabels.btn4);
+    optionPopup.render(renderer);
+  } else {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 
   renderer.displayBuffer();
 }
