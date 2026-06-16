@@ -1,4 +1,6 @@
 #pragma once
+#include <I18n.h>
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -9,25 +11,52 @@
 
 class OptionPopup {
  public:
-  void show(const char* title, const std::vector<std::string>& options, int currentIndex,
+  void show(StrId titleId, const StrId* optionIds, int optionCount, int currentIndex,
             std::function<void(int)> onSelect) {
-    this->title = title;
-    this->options = options;
-    this->selectedIndex = currentIndex;
-    this->onSelectCallback = std::move(onSelect);
-    this->active = true;
+    title = I18N.get(titleId);
+    strIds = optionIds;
+    strIdCount = optionCount;
+    rawStrings = nullptr;
+    ownedStrings.clear();
+    selectedIndex = currentIndex;
+    onSelectCallback = std::move(onSelect);
+    active = true;
+  }
+
+  void show(const char* titleStr, const char* const* options, int optionCount, int currentIndex,
+            std::function<void(int)> onSelect) {
+    title = titleStr;
+    rawStrings = options;
+    strIdCount = optionCount;
+    strIds = nullptr;
+    ownedStrings.clear();
+    selectedIndex = currentIndex;
+    onSelectCallback = std::move(onSelect);
+    active = true;
+  }
+
+  void show(StrId titleId, const std::vector<std::string>& options, int currentIndex,
+            std::function<void(int)> onSelect) {
+    title = I18N.get(titleId);
+    ownedStrings = options;
+    strIdCount = static_cast<int>(options.size());
+    strIds = nullptr;
+    rawStrings = nullptr;
+    selectedIndex = currentIndex;
+    onSelectCallback = std::move(onSelect);
+    active = true;
   }
 
   bool handleInput(MappedInputManager& input, const std::function<void()>& requestUpdate) {
     if (!active) return false;
 
     if (input.wasPressed(MappedInputManager::Button::Up) || input.wasPressed(MappedInputManager::Button::Left)) {
-      selectedIndex = (selectedIndex - 1 + options.size()) % options.size();
+      selectedIndex = (selectedIndex - 1 + strIdCount) % strIdCount;
       requestUpdate();
       return true;
     } else if (input.wasPressed(MappedInputManager::Button::Down) ||
                input.wasPressed(MappedInputManager::Button::Right)) {
-      selectedIndex = (selectedIndex + 1) % options.size();
+      selectedIndex = (selectedIndex + 1) % strIdCount;
       requestUpdate();
       return true;
     } else if (input.wasPressed(MappedInputManager::Button::Confirm)) {
@@ -40,20 +69,32 @@ class OptionPopup {
       requestUpdate();
       return true;
     }
-    return true;  // Consume all input while active
+    return true;
   }
 
   void render(GfxRenderer& renderer) const {
     if (!active) return;
-    GUI.drawOptionPopup(renderer, title.c_str(), options, selectedIndex);
+    if (!ownedStrings.empty()) {
+      GUI.drawOptionPopup(renderer, title, ownedStrings, selectedIndex);
+      return;
+    }
+    std::vector<std::string> opts;
+    opts.reserve(strIdCount);
+    for (int i = 0; i < strIdCount; i++) {
+      opts.emplace_back(strIds ? I18N.get(strIds[i]) : rawStrings[i]);
+    }
+    GUI.drawOptionPopup(renderer, title, opts, selectedIndex);
   }
 
   bool isActive() const { return active; }
 
  private:
   bool active = false;
-  std::string title;
-  std::vector<std::string> options;
+  const char* title = nullptr;
+  const StrId* strIds = nullptr;
+  const char* const* rawStrings = nullptr;
+  std::vector<std::string> ownedStrings;
+  int strIdCount = 0;
   int selectedIndex = 0;
   std::function<void(int)> onSelectCallback;
 };

@@ -211,11 +211,8 @@ void SettingsActivity::toggleCurrentSetting() {
     const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
     if (setting.enumValues.size() > 2) {
       const auto valuePtr = setting.valuePtr;
-      std::vector<std::string> opts;
-      opts.reserve(setting.enumValues.size());
-      for (auto id : setting.enumValues) opts.push_back(I18N.get(id));
-      optionPopup.show(I18N.get(setting.nameId), opts, currentValue,
-                       [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+      optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()),
+                       currentValue, [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
                          SETTINGS.*valuePtr = idx;
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
                          SETTINGS.saveToFile();
@@ -241,20 +238,18 @@ void SettingsActivity::toggleCurrentSetting() {
     const uint8_t cur = setting.valueGetter();
     if (totalValues > 2) {
       const auto valueSetter = setting.valueSetter;
-      std::vector<std::string> opts;
+      auto onSelect = [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+        valueSetter(idx);
+        syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+        SETTINGS.saveToFile();
+        rebuildSettingsLists();
+      };
       if (!setting.enumStringValues.empty()) {
-        opts = setting.enumStringValues;
+        optionPopup.show(setting.nameId, setting.enumStringValues, cur, std::move(onSelect));
       } else {
-        opts.reserve(setting.enumValues.size());
-        for (auto id : setting.enumValues) opts.push_back(I18N.get(id));
+        optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()), cur,
+                         std::move(onSelect));
       }
-      optionPopup.show(I18N.get(setting.nameId), opts, cur,
-                       [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
-                         valueSetter(idx);
-                         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
-                         SETTINGS.saveToFile();
-                         rebuildSettingsLists();
-                       });
       requestUpdate();
       return;
     }

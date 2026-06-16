@@ -66,24 +66,21 @@ void EpubReaderMenuActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     const auto selectedAction = menuItems[selectedIndex].action;
     if (selectedAction == MenuAction::ROTATE_SCREEN) {
-      std::vector<std::string> opts;
-      for (auto id : orientationLabels) opts.push_back(I18N.get(id));
-      optionPopup.show(I18N.get(StrId::STR_ORIENTATION), opts, pendingOrientation, [this](int idx) {
-        pendingOrientation = idx;
-        // Cycle orientation preview locally; actual rotation happens on menu exit.
-        requestUpdate();
-      });
+      optionPopup.show(StrId::STR_ORIENTATION, orientationLabels.data(), static_cast<int>(orientationLabels.size()),
+                       pendingOrientation, [this](int idx) {
+                         pendingOrientation = idx;
+                         requestUpdate();
+                       });
       requestUpdate();
       return;
     }
 
     if (selectedAction == MenuAction::AUTO_PAGE_TURN) {
-      std::vector<std::string> opts;
-      for (const auto* label : pageTurnLabels) opts.push_back(label);
-      optionPopup.show(I18N.get(StrId::STR_AUTO_TURN_PAGES_PER_MIN), opts, selectedPageTurnOption, [this](int idx) {
-        selectedPageTurnOption = idx;
-        requestUpdate();
-      });
+      optionPopup.show(I18N.get(StrId::STR_AUTO_TURN_PAGES_PER_MIN), pageTurnLabels.data(),
+                       static_cast<int>(pageTurnLabels.size()), selectedPageTurnOption, [this](int idx) {
+                         selectedPageTurnOption = idx;
+                         requestUpdate();
+                       });
       requestUpdate();
       return;
     }

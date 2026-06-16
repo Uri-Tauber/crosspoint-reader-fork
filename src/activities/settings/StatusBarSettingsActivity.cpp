@@ -166,37 +166,31 @@ void StatusBarSettingsActivity::handleSelection() {
       SETTINGS.statusBarBookProgressPercentage = (SETTINGS.statusBarBookProgressPercentage + 1) % 2;
       break;
     case ITEM_PROGRESS_BAR:
-      optionPopup.show(I18N.get(StrId::STR_PROGRESS_BAR),
-                       {I18N.get(progressBarNames[0]), I18N.get(progressBarNames[1]), I18N.get(progressBarNames[2])},
-                       SETTINGS.statusBarProgressBar, [this](int idx) {
+      optionPopup.show(StrId::STR_PROGRESS_BAR, progressBarNames, PROGRESS_BAR_ITEMS, SETTINGS.statusBarProgressBar,
+                       [this](int idx) {
                          SETTINGS.statusBarProgressBar = idx;
                          SETTINGS.saveToFile();
                        });
       return;
     case ITEM_PROGRESS_BAR_THICKNESS:
-      optionPopup.show(I18N.get(StrId::STR_PROGRESS_BAR_THICKNESS),
-                       {I18N.get(progressBarThicknessNames[0]), I18N.get(progressBarThicknessNames[1]),
-                        I18N.get(progressBarThicknessNames[2])},
+      optionPopup.show(StrId::STR_PROGRESS_BAR_THICKNESS, progressBarThicknessNames, PROGRESS_BAR_THICKNESS_ITEMS,
                        SETTINGS.statusBarProgressBarThickness, [this](int idx) {
                          SETTINGS.statusBarProgressBarThickness = idx;
                          SETTINGS.saveToFile();
                        });
       return;
     case ITEM_TITLE:
-      optionPopup.show(I18N.get(StrId::STR_TITLE),
-                       {I18N.get(titleNames[0]), I18N.get(titleNames[1]), I18N.get(titleNames[2])},
-                       SETTINGS.statusBarTitle, [this](int idx) {
-                         SETTINGS.statusBarTitle = idx;
-                         SETTINGS.saveToFile();
-                       });
+      optionPopup.show(StrId::STR_TITLE, titleNames, TITLE_ITEMS, SETTINGS.statusBarTitle, [this](int idx) {
+        SETTINGS.statusBarTitle = idx;
+        SETTINGS.saveToFile();
+      });
       return;
     case ITEM_BATTERY:
       SETTINGS.statusBarBattery = (SETTINGS.statusBarBattery + 1) % 2;
       break;
     case ITEM_XTC_STATUS_BAR:
-      optionPopup.show(I18N.get(StrId::STR_XTC_STATUS_BAR),
-                       {I18N.get(xtcStatusBarNames[0]), I18N.get(xtcStatusBarNames[1]), I18N.get(xtcStatusBarNames[2])},
-                       SETTINGS.xtcStatusBarMode, [this](int idx) {
+      optionPopup.show(StrId::STR_XTC_STATUS_BAR, xtcStatusBarNames, XTC_STATUS_BAR_ITEMS, SETTINGS.xtcStatusBarMode,
+                       [this](int idx) {
                          SETTINGS.xtcStatusBarMode = idx;
                          SETTINGS.saveToFile();
                        });
