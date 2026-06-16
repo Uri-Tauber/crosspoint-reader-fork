@@ -102,6 +102,7 @@ struct ThemeMetrics {
   bool optionPopupSelectionLight;
   bool optionPopupDrawAllRows;
   int optionPopupDialogSideMargin;
+  bool optionPopupTitleSeparator;
 
   int textFieldHorizontalPadding;
   int textFieldNormalThickness;
@@ -185,6 +186,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .optionPopupSelectionLight = false,
                                  .optionPopupDrawAllRows = false,
                                  .optionPopupDialogSideMargin = 20,
+                                 .optionPopupTitleSeparator = true,
                                  .textFieldHorizontalPadding = 6,
                                  .textFieldNormalThickness = 1,
                                  .textFieldCursorThickness = 3,

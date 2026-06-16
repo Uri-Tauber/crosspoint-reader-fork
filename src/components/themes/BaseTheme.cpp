@@ -1011,7 +1011,14 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
   int y = dialogY + innerPadding;
 
   renderer.drawCenteredText(UI_12_FONT_ID, y, title, true, EpdFontFamily::BOLD);
-  y += titleLineHeight + metrics.optionPopupTitleGap;
+  y += titleLineHeight;
+
+  if (metrics.optionPopupTitleSeparator) {
+    const int sepY = y + metrics.optionPopupTitleGap / 2;
+    renderer.drawLine(dialogX + innerPadding, sepY, dialogX + dialogW - innerPadding, sepY, true);
+  }
+
+  y += metrics.optionPopupTitleGap;
 
   for (int i = 0; i < optionCount; i++) {
     const int itemY = y + i * (rowHeight + itemSpacing);
@@ -1040,7 +1047,10 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
     const int textW = renderer.getTextWidth(optionFontId, labelText, optionStyle);
     const int textY = itemY + (rowHeight - textH) / 2;
     const int textX = itemRectX + (itemRectW - textW) / 2;
-    const bool invertText = selected ? !metrics.optionPopupSelectionLight : true;
+    // Unselected items: text is dark (invert=true means draw on white bg).
+    // Selected on dark bg: text must be white (invert=false).
+    // Selected on light bg: text stays dark (invert=true).
+    const bool invertText = selected ? metrics.optionPopupSelectionLight : true;
     renderer.drawText(optionFontId, textX, textY, labelText, invertText, optionStyle);
   }
 }
