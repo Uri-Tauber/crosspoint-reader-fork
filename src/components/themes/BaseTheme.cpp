@@ -1020,14 +1020,14 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
 
   y += metrics.optionPopupTitleGap;
 
+  const int itemRectX = dialogX + innerPadding;
+  const int itemRectW = dialogW - innerPadding * 2;
+  const int selectionRadius = metrics.optionPopupSelectionRadius;
+
   for (int i = 0; i < optionCount; i++) {
     const int itemY = y + i * (rowHeight + itemSpacing);
     const bool selected = (i == selectedIndex);
     const char* labelText = options[i].c_str();
-
-    const int itemRectX = dialogX + innerPadding;
-    const int itemRectW = dialogW - innerPadding * 2;
-    const int selectionRadius = metrics.optionPopupSelectionRadius;
 
     if (metrics.optionPopupDrawAllRows || selected) {
       Color rowColor;
@@ -1043,9 +1043,8 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
       }
     }
 
-    const int textH = renderer.getLineHeight(optionFontId);
     const int textW = renderer.getTextWidth(optionFontId, labelText, optionStyle);
-    const int textY = itemY + (rowHeight - textH) / 2;
+    const int textY = itemY + (rowHeight - optionLineHeight) / 2;
     const int textX = itemRectX + (itemRectW - textW) / 2;
     // Unselected items: text is dark (invert=true means draw on white bg).
     // Selected on dark bg: text must be white (invert=false).

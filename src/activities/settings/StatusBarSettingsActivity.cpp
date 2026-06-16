@@ -215,6 +215,14 @@ void StatusBarSettingsActivity::handleSelection() {
 }
 
 void StatusBarSettingsActivity::render(RenderLock&&) {
+  if (optionPopup.isActive()) {
+    const auto popupLabels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, popupLabels.btn1, popupLabels.btn2, popupLabels.btn3, popupLabels.btn4);
+    optionPopup.render(renderer);
+    renderer.displayBuffer();
+    return;
+  }
+
   renderer.clearScreen();
 
   auto metrics = UITheme::getInstance().getMetrics();
@@ -261,14 +269,8 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
       true);
 
   // Draw button hints
-  if (optionPopup.isActive()) {
-    const auto popupLabels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-    GUI.drawButtonHints(renderer, popupLabels.btn1, popupLabels.btn2, popupLabels.btn3, popupLabels.btn4);
-    optionPopup.render(renderer);
-  } else {
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  }
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   std::string title;
   if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
