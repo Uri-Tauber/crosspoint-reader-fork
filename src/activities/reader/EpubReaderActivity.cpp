@@ -129,6 +129,15 @@ void EpubReaderActivity::onEnter() {
 
   epub->setupCacheDir();
 
+  // Load bookmarks
+  const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
+  if (Storage.exists(path.c_str())) {
+    String json = Storage.readFile(path.c_str());
+    if (!json.isEmpty()) {
+      JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
+    }
+  }
+
   HalFile f;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
     uint8_t data[6];
@@ -256,6 +265,11 @@ void EpubReaderActivity::loop() {
     requestUpdate();
   }
 
+  if (showBookmarkRemovedMessage && (millis() - bookmarkMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
+    showBookmarkRemovedMessage = false;
+    requestUpdate();
+  }
+
   // Enter reader menu activity on short-press Confirm. A long-press that fired a bound
   // function (bookmark or KOReader sync) sets ignoreNextConfirmRelease so the release
   // following the hold does not also open the menu.
@@ -291,9 +305,8 @@ void EpubReaderActivity::loop() {
     switch (SETTINGS.longPressMenuFunction) {
       case CrossPointSettings::LP_MENU_BOOKMARK:
         // Hold ~0.4s drops a bookmark at the current page.
-        if (mappedInput.getHeldTime() >= ReaderUtils::BOOKMARK_HOLD_MS && !showBookmarkMessage) {
-          addBookmark();
-          showBookmarkMessage = true;
+        if (mappedInput.getHeldTime() >= ReaderUtils::BOOKMARK_HOLD_MS && !showBookmarkMessage && !showBookmarkRemovedMessage) {
+          toggleBookmark();
           ignoreNextConfirmRelease = true;  // Prevent accidental menu open after adding bookmark
           bookmarkMessageTime = millis();
           requestUpdate();
@@ -927,6 +940,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (showBookmarkMessage) {
     GUI.drawPopup(renderer, tr(STR_BOOKMARK_ADDED));
   }
+
+  if (showBookmarkRemovedMessage) {
+    GUI.drawPopup(renderer, tr(STR_BOOKMARK_REMOVED));
+  }
 }
 
 void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportWidth, const uint16_t viewportHeight) {
@@ -1149,7 +1166,7 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub->getTitle();
   }
 
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset);
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, isCurrentPageBookmarked());
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
@@ -1211,11 +1228,42 @@ void EpubReaderActivity::restoreSavedPosition() {
   requestUpdate();
 }
 
-void EpubReaderActivity::addBookmark() {
+bool EpubReaderActivity::isCurrentPageBookmarked() const {
+  // It's possible the user edited the bookmarks from the Bookmarks Menu.
+  // Although not completely optimal, re-reading the list before checking is safer
+  // if we don't want to pipe a return value back from that menu.
+  // Alternatively, just cast away constness to reload here, but making a local copy is cleaner:
+  std::vector<BookmarkEntry> currentBookmarks;
+  const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
+  if (Storage.exists(path.c_str())) {
+    String json = Storage.readFile(path.c_str());
+    if (!json.isEmpty()) {
+      JsonSettingsIO::loadBookmarks(currentBookmarks, json.c_str());
+    }
+  }
+
+  if (currentBookmarks.empty()) return false;
+
+  SavedProgressPosition progress = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
+  return std::any_of(currentBookmarks.begin(), currentBookmarks.end(), [&](const BookmarkEntry& bookmark) {
+    return bookmark.xpath == progress.xpath;
+  });
+}
+
+void EpubReaderActivity::toggleBookmark() {
   if (!section || !epub) {
     return;
   }
-  LOG_DBG("ERS", "Adding bookmark at spine %d, page %d", currentSpineIndex, section ? section->currentPage : -1);
+
+  // Reload bookmarks from file to avoid overwriting changes made by sub-activities
+  const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
+  if (Storage.exists(path.c_str())) {
+    String json = Storage.readFile(path.c_str());
+    if (!json.isEmpty()) {
+      JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
+    }
+  }
+
   int currentPage;
   int pageCount;
   {
@@ -1236,26 +1284,31 @@ void EpubReaderActivity::addBookmark() {
   entry.xpath = progress.xpath;
   entry.summary = BookmarkUtil::sanitizeBookmarkSummary(pageText);
 
-  // Add bookmark
-  const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
-  LOG_DBG("ERS", "Bookmark path: %s", path.c_str());
   const std::string bookmarksDir = BookmarkUtil::getBookmarksDir();
   Storage.mkdir(bookmarksDir.c_str());
-  std::vector<BookmarkEntry> bookmarks;
-  if (Storage.exists(path.c_str())) {
-    LOG_DBG("ERS", "Existing bookmark file found, loading bookmarks");
-    String json = Storage.readFile(path.c_str());
-    if (!json.isEmpty()) {
-      JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
-    }
+
+  auto it = std::find_if(bookmarks.begin(), bookmarks.end(), [&](const BookmarkEntry& b) {
+    return b.xpath == progress.xpath;
+  });
+
+  bool removed = false;
+  if (it != bookmarks.end()) {
+    bookmarks.erase(it);
+    removed = true;
+    LOG_DBG("ERS", "Removing bookmark at spine %d, page %d", currentSpineIndex, section ? section->currentPage : -1);
   } else {
-    LOG_DBG("ERS", "No existing bookmark file, starting with empty bookmark list");
+    bookmarks.insert(bookmarks.begin(), entry);
+    LOG_DBG("ERS", "Adding bookmark at spine %d, page %d", currentSpineIndex, section ? section->currentPage : -1);
   }
-  bookmarks.insert(bookmarks.begin(), entry);
+
   LOG_DBG("ERS", "Saving bookmark to file: %s", path.c_str());
   const bool ok = JsonSettingsIO::saveBookmarks(bookmarks, path.c_str());
   if (ok) {
-    showBookmarkMessage = true;
+    if (removed) {
+      showBookmarkRemovedMessage = true;
+    } else {
+      showBookmarkMessage = true;
+    }
   } else {
     LOG_ERR("ERS", "Failed to save bookmark to: %s", path.c_str());
   }
