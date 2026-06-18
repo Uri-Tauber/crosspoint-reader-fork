@@ -9,9 +9,12 @@
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
 
+#include "BookmarkEntry.h"
+
 class EpubReaderActivity final : public Activity {
   std::shared_ptr<Epub> epub;
   std::unique_ptr<Section> section = nullptr;
+  std::vector<BookmarkEntry> bookmarks;
   int currentSpineIndex = 0;
   int nextPageNumber = 0;
   std::optional<uint16_t> pendingPageJump;
@@ -33,6 +36,7 @@ class EpubReaderActivity final : public Activity {
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
   bool showBookmarkMessage = false;
+  bool showBookmarkRemovedMessage = false;
   bool ignoreNextConfirmRelease = false;
   // Tracks whether this book is currently removed from Recent Books by the
   // removeReadBooksFromRecents feature (set at End-of-Book, cleared if paged back in).
@@ -66,7 +70,8 @@ class EpubReaderActivity final : public Activity {
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
-  void addBookmark();
+  void toggleBookmark();
+  bool isCurrentPageBookmarked() const;
 
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);
