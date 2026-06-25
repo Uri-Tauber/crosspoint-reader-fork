@@ -5,6 +5,7 @@
 
 #include <optional>
 
+#include "BookmarkEntry.h"
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
@@ -34,6 +35,9 @@ class EpubReaderActivity final : public Activity {
   bool automaticPageTurnActive = false;
   bool showBookmarkMessage = false;
   bool ignoreNextConfirmRelease = false;
+  bool currentPageBookmarked = false;
+  bool bookmarkRemoved = false;  // true when last toggle removed (controls popup text)
+  std::vector<BookmarkEntry> cachedBookmarks;
   // Tracks whether this book is currently removed from Recent Books by the
   // removeReadBooksFromRecents feature (set at End-of-Book, cleared if paged back in).
   bool recentsEntryRemoved = false;
@@ -60,10 +64,15 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
+  // Returns true if sync acted (launched, or surfaced a save error); false if it was a no-op
+  // because no KOReader credentials are stored.
+  bool launchKOReaderSync();
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
+  void loadCachedBookmarks();
   void addBookmark();
+  void updateBookmarkFlag();
 
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);
