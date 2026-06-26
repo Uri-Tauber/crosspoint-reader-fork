@@ -37,7 +37,8 @@ class ChapterHtmlSlimParser {
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
-  std::unique_ptr<ParsedText> currentTextBlock = nullptr;
+  ParsedText currentTextBlock;
+  bool textBlockActive = false;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
   int fontId;
@@ -124,6 +125,7 @@ class ChapterHtmlSlimParser {
       : epub(epub),
         filepath(filepath),
         renderer(renderer),
+        currentTextBlock(extraParagraphSpacing, hyphenationEnabled, focusReadingEnabled),
         fontId(fontId),
         lineCompression(lineCompression),
         extraParagraphSpacing(extraParagraphSpacing),
