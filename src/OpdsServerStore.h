@@ -9,8 +9,9 @@ struct OpdsServer {
   std::string password;  // Plaintext in memory; obfuscated with hardware key on disk
 };
 
-#include "PersistableStore.h"
 #include <ArduinoJson.h>
+
+#include "PersistableStore.h"
 
 /**
  * Singleton class for storing OPDS server configurations on the SD card.
