@@ -11,9 +11,8 @@ struct RecentBook {
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
 
-#include <ArduinoJson.h>
-
 #include "PersistableStore.h"
+#include <ArduinoJson.h>
 
 class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   std::vector<RecentBook> recentBooks;
