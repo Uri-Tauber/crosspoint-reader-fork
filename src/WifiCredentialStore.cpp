@@ -40,12 +40,7 @@ bool WifiCredentialStore::fromJson(const String& json) {
     if (credentials.size() >= MAX_NETWORKS) break;
     WifiCredential cred;
     cred.ssid = obj["ssid"] | std::string("");
-    bool ok = false;
-    cred.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
-    if (!ok || cred.password.empty()) {
-      cred.password = obj["password"] | std::string("");
-      if (!cred.password.empty()) needsResave = true;
-    }
+    cred.password = extractPassword(obj, needsResave);
     credentials.push_back(cred);
   }
 

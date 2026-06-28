@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <ObfuscationUtils.h>
 
 /**
  * @brief Base class for persistable singletons using CRTP.
@@ -45,5 +47,20 @@ class PersistableStore {
       }
     }
     return false;
+  }
+
+ protected:
+  /**
+   * Helper function for extracting an obfuscated password from a JSON document.
+   * If the decoded password requires a resave (e.g. from plaintext fallback), `needsResave` is set to true.
+   */
+  std::string extractPassword(const JsonDocument& doc, bool& needsResave) const {
+    bool ok = false;
+    std::string pass = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok);
+    if (!ok || pass.empty()) {
+      pass = doc["password"] | std::string("");
+      if (!pass.empty()) needsResave = true;
+    }
+    return pass;
   }
 };

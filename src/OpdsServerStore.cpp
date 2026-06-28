@@ -43,14 +43,7 @@ bool OpdsServerStore::fromJson(const String& json) {
     server.name = obj["name"] | std::string("");
     server.url = obj["url"] | std::string("");
     server.username = obj["username"] | std::string("");
-    // Try the obfuscated key first; fall back to plaintext "password" for
-    // files written before obfuscation was added (or hand-edited JSON).
-    bool ok = false;
-    server.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
-    if (!ok || server.password.empty()) {
-      server.password = obj["password"] | std::string("");
-      if (!server.password.empty()) needsResave = true;
-    }
+    server.password = extractPassword(obj, needsResave);
     servers.push_back(std::move(server));
   }
 
