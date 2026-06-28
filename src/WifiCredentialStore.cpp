@@ -1,10 +1,8 @@
 #include "WifiCredentialStore.h"
 
 #include <HalStorage.h>
-#include <JsonSettingsIO.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
-#include <Serialization.h>
 
 String WifiCredentialStore::toJson() const {
   JsonDocument doc;

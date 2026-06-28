@@ -6,8 +6,6 @@
 
 #include <cstring>
 
-#include "CrossPointSettings.h"
-
 String OpdsServerStore::toJson() const {
   JsonDocument doc;
 
