@@ -184,6 +184,10 @@ class GfxRenderer {
                        bool roundBottomLeft, bool roundBottomRight, Color color) const;
   void drawImage(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawIcon(const uint8_t bitmap[], int x, int y, int size) const;
+  // Non-square icon variant — same per-pixel blit as the square overload, but
+  // honors width and height independently. Required by freeink-sdk's
+  // FreeInkUIGfxRenderer (which forwards Mask1 bitmaps at native dimensions).
+  void drawIcon(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
                   float cropY = 0) const;
   void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;

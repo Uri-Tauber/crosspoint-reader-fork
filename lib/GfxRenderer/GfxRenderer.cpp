@@ -1074,6 +1074,25 @@ void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, con
   }
 }
 
+void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, const int width, const int height) const {
+  // Non-square variant of drawIcon. Same per-pixel blit as the square
+  // overload, with width and height honored independently. Rows map to the
+  // x-direction (reversed, as in the square version) and columns to the
+  // y-direction. Used by freeink-sdk's FreeInkUIGfxRenderer, which forwards
+  // Mask1 bitmaps at their native dimensions.
+  if (width <= 0 || height <= 0) return;
+  const int rowBytes = (width + 7) / 8;
+  for (int row = 0; row < height; row++) {
+    for (int col = 0; col < width; col++) {
+      const uint8_t byte = bitmap[row * rowBytes + (col >> 3)];
+      const bool ink = ((byte >> (7 - (col & 7))) & 1) == 0;
+      if (ink) {
+        drawPixel(x + (height - 1 - row), y + col, true);
+      }
+    }
+  }
+}
+
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
