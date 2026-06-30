@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <esp_system.h>
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -205,7 +206,11 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   }
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled);
-  std::vector<PageLutEntry> lut = {};
+  std::vector<PageLutEntry> lut;
+  // Pre-allocate LUT to avoid heap fragmentation during page creation.
+  // Most chapters produce fewer than 100 pages; reserve conservatively to handle
+  // large chapters while avoiding over-allocation on small ones.
+  lut.reserve(128);
 
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = localPath.find_last_of('/');
@@ -232,6 +237,27 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
       if (!entry.anchor.empty()) {
         tocAnchors.push_back(std::move(entry.anchor));
       }
+    }
+  }
+
+  // Minimal heap required before attempting section parsing.
+  // Parsing large chapters with images allocates heavily; ensure enough free memory
+  // to avoid fragmentation crashes on ESP32-C3's ~380KB RAM.
+  constexpr size_t MIN_HEAP_FOR_SECTION_PARSING = 40 * 1024;
+  constexpr size_t MIN_LARGEST_BLOCK_FOR_SECTION_PARSING = 32 * 1024;
+
+  // Check heap before parsing - section creation allocates buffers for pages and images.
+  // If heap is too low, skip this spine and try the next one on subsequent accesses.
+  {
+    size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (freeHeap < MIN_HEAP_FOR_SECTION_PARSING || largestBlock < MIN_LARGEST_BLOCK_FOR_SECTION_PARSING) {
+      LOG_INF("SCT", "Heap too low for spine %d (free=%zu largest=%zu), skipping section creation", spineIndex,
+              freeHeap, largestBlock);
+      // Clean up: close the output file and remove any partial output
+      file.close();
+      Storage.remove(filePath.c_str());
+      return false;
     }
   }
 
@@ -284,6 +310,10 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     serialization::writeString(file, anchor);
     serialization::writePod(file, page);
   }
+
+  // Release parsed anchor data early to reduce heap pressure before writing remaining LUTs.
+  // This helps with large chapters where the anchor map can grow significantly.
+  visitor.clearAnchorMap();
 
   const uint32_t paragraphLutOffset = file.position();
   serialization::writePod(file, static_cast<uint16_t>(lut.size()));
