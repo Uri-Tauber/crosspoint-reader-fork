@@ -955,6 +955,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         renderer.displayBuffer();
         automaticPageTurnActive = false;
         showPendingSyncSaveError();
+        section->clearCache();
+        section.reset();
         pageLoadRetryCount = 0;  // reset for subsequent user attempts
         return;
       }
