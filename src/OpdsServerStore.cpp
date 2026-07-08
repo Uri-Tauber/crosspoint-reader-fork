@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
+#include <algorithm>
 #include <cstring>
 
 String OpdsServerStore::toJson() const {
@@ -30,12 +31,11 @@ bool OpdsServerStore::fromJson(const String& json) {
     return false;
   }
 
-  if (!doc["servers"].is<JsonArray>()) {
-    LOG_ERR("OPS", "Invalid JSON: 'servers' missing or not an array");
-    return false;
-  }
+  // Tolerate a missing/invalid 'servers' key (treat as empty list); only a
+  // JSON parse error is fatal. A null JsonArray iterates zero times.
   servers.clear();
   JsonArray arr = doc["servers"].as<JsonArray>();
+  servers.reserve(std::min(arr.size(), MAX_SERVERS));
   bool needsResave = false;
 
   for (JsonObject obj : arr) {

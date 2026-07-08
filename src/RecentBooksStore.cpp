@@ -33,10 +33,8 @@ bool RecentBooksStore::fromJson(const String& json) {
     return false;
   }
 
-  if (!doc["books"].is<JsonArray>()) {
-    LOG_ERR("RBS", "Invalid JSON: 'books' missing or not an array");
-    return false;
-  }
+  // Tolerate a missing/invalid 'books' key (treat as empty list); only a
+  // JSON parse error is fatal. A null JsonArray iterates zero times.
   recentBooks.clear();
   JsonArray arr = doc["books"].as<JsonArray>();
   recentBooks.reserve(std::min(arr.size(), static_cast<size_t>(MAX_RECENT_BOOKS)));

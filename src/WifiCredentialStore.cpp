@@ -29,13 +29,10 @@ bool WifiCredentialStore::fromJson(const String& json) {
     return false;
   }
 
-  if (!doc["credentials"].is<JsonArray>()) {
-    LOG_ERR("WCS", "Invalid JSON: 'credentials' missing or not an array");
-    return false;
-  }
-
   lastConnectedSsid = doc["lastConnectedSsid"] | std::string("");
 
+  // Tolerate a missing/invalid 'credentials' key (treat as empty list); only
+  // a JSON parse error is fatal. A null JsonArray iterates zero times.
   credentials.clear();
   JsonArray arr = doc["credentials"].as<JsonArray>();
   credentials.reserve(std::min(arr.size(), MAX_NETWORKS));
