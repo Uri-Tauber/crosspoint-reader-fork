@@ -29,8 +29,8 @@ class OpdsServerStore : public PersistableStore<OpdsServerStore> {
 
  public:
   static const char* getFilePath() { return "/.crosspoint/opds.json"; }
-  String toJson() const;
-  bool fromJson(const String& json);
+  void toJson(JsonDocument& doc) const;
+  bool fromJson(JsonVariantConst doc);
 
   bool addServer(const OpdsServer& server);
   bool updateServer(size_t index, const OpdsServer& server);

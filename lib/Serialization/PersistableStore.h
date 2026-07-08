@@ -8,21 +8,23 @@
 /**
  * @brief Non-template core of PersistableStore.
  *
- * The Storage/logging/JSON helpers live here (compiled once in
- * PersistableStore.cpp) instead of in the class template, so they are not
- * duplicated in flash for every store instantiation.
+ * All ArduinoJson parse/serialize machinery is instantiated once here (in
+ * PersistableStore.cpp) instead of in every store's translation unit. GCC
+ * emits the JSON serializer/parser templates as local .isra clones per TU
+ * (~0.5KB each), so keeping serializeJson/deserializeJson out of the stores
+ * is what makes the abstraction flash-neutral.
  */
 class PersistableStoreBase {
  protected:
   PersistableStoreBase() = default;
   ~PersistableStoreBase() = default;
 
-  // Writes json to path (ensures /.crosspoint exists). Logs on failure.
-  static bool writeJsonFile(const char* path, const String& json);
+  // Serializes doc and writes it to path (ensures /.crosspoint exists). Logs on failure.
+  static bool writeDocToFile(const char* path, const JsonDocument& doc);
 
-  // Reads path into jsonOut. Returns false silently when the file does not
-  // exist (expected on first boot) and with LOG_ERR when the read is empty.
-  static bool readJsonFile(const char* path, String& jsonOut);
+  // Reads path and parses it into doc. Returns false silently when the file
+  // does not exist (expected on first boot); logs on read/parse failure.
+  static bool readDocFromFile(const char* path, JsonDocument& doc);
 
   /**
    * Helper function for extracting an obfuscated password from a JSON value.
@@ -40,8 +42,13 @@ class PersistableStoreBase {
  * - A private default constructor
  * - friend class PersistableStore<Derived>;
  * - static const char* getFilePath();
- * - String toJson() const;
- * - bool fromJson(const String& json);
+ * - void toJson(JsonDocument& doc) const;
+ * - bool fromJson(JsonVariantConst doc);
+ *
+ * Note for implementers: read string values as `const char*` (e.g.
+ * `obj["name"] | ""`), never as `| std::string("")` — ArduinoJson's
+ * std::string converter drags a per-TU copy of the whole JSON serializer
+ * into flash via its serializeJson fallback.
  */
 template <typename T>
 class PersistableStore : public PersistableStoreBase {
@@ -59,13 +66,17 @@ class PersistableStore : public PersistableStoreBase {
     return instance;
   }
 
-  bool saveToFile() const { return writeJsonFile(T::getFilePath(), static_cast<const T*>(this)->toJson()); }
+  bool saveToFile() const {
+    JsonDocument doc;
+    static_cast<const T*>(this)->toJson(doc);
+    return writeDocToFile(T::getFilePath(), doc);
+  }
 
   bool loadFromFile() {
-    String json;
-    if (!readJsonFile(T::getFilePath(), json)) {
+    JsonDocument doc;
+    if (!readDocFromFile(T::getFilePath(), doc)) {
       return false;
     }
-    return static_cast<T*>(this)->fromJson(json);
+    return static_cast<T*>(this)->fromJson(doc.as<JsonVariantConst>());
   }
 };

@@ -6,9 +6,7 @@
 #include <algorithm>
 #include <cstring>
 
-String OpdsServerStore::toJson() const {
-  JsonDocument doc;
-
+void OpdsServerStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["servers"].to<JsonArray>();
   for (const auto& server : servers) {
     JsonObject obj = arr.add<JsonObject>();
@@ -17,33 +15,22 @@ String OpdsServerStore::toJson() const {
     obj["username"] = server.username;
     obj["password_obf"] = obfuscation::obfuscateToBase64(server.password);
   }
-
-  String json;
-  serializeJson(doc, json);
-  return json;
 }
 
-bool OpdsServerStore::fromJson(const String& json) {
-  JsonDocument doc;
-  auto error = deserializeJson(doc, json);
-  if (error) {
-    LOG_ERR("OPS", "JSON parse error: %s", error.c_str());
-    return false;
-  }
-
+bool OpdsServerStore::fromJson(JsonVariantConst doc) {
   // Tolerate a missing/invalid 'servers' key (treat as empty list); only a
   // JSON parse error is fatal. A null JsonArray iterates zero times.
   servers.clear();
-  JsonArray arr = doc["servers"].as<JsonArray>();
+  JsonArrayConst arr = doc["servers"].as<JsonArrayConst>();
   servers.reserve(std::min(arr.size(), MAX_SERVERS));
   bool needsResave = false;
 
-  for (JsonObject obj : arr) {
+  for (JsonObjectConst obj : arr) {
     if (servers.size() >= OpdsServerStore::MAX_SERVERS) break;
     OpdsServer server;
-    server.name = obj["name"] | std::string("");
-    server.url = obj["url"] | std::string("");
-    server.username = obj["username"] | std::string("");
+    server.name = obj["name"] | "";
+    server.url = obj["url"] | "";
+    server.username = obj["username"] | "";
     server.password = extractPassword(obj, needsResave);
     servers.push_back(std::move(server));
   }

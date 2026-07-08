@@ -33,8 +33,8 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
 
  public:
   static const char* getFilePath() { return "/.crosspoint/koreader.json"; }
-  String toJson() const;
-  bool fromJson(const String& json);
+  void toJson(JsonDocument& doc) const;
+  bool fromJson(JsonVariantConst doc);
 
   // Credential management
   void setCredentials(const std::string& user, const std::string& pass);

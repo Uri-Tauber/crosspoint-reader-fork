@@ -4,8 +4,10 @@
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
-bool PersistableStoreBase::writeJsonFile(const char* path, const String& json) {
+bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& doc) {
   Storage.mkdir("/.crosspoint");
+  String json;
+  serializeJson(doc, json);
   if (!Storage.writeFile(path, json)) {
     LOG_ERR("PERSIST", "Failed to write %s", path);
     return false;
@@ -13,13 +15,18 @@ bool PersistableStoreBase::writeJsonFile(const char* path, const String& json) {
   return true;
 }
 
-bool PersistableStoreBase::readJsonFile(const char* path, String& jsonOut) {
+bool PersistableStoreBase::readDocFromFile(const char* path, JsonDocument& doc) {
   if (!Storage.exists(path)) {
     return false;  // Expected on first boot — not an error.
   }
-  jsonOut = Storage.readFile(path);
-  if (jsonOut.isEmpty()) {
+  String json = Storage.readFile(path);
+  if (json.isEmpty()) {
     LOG_ERR("PERSIST", "Failed to read %s (empty)", path);
+    return false;
+  }
+  auto error = deserializeJson(doc, json);
+  if (error) {
+    LOG_ERR("PERSIST", "JSON parse error in %s: %s", path, error.c_str());
     return false;
   }
   return true;
@@ -30,7 +37,7 @@ std::string PersistableStoreBase::extractPassword(JsonVariantConst doc, bool& ne
   std::string pass = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok);
   if (!ok) {
     // Deobfuscation failed — fall back to legacy plaintext password.
-    pass = doc["password"] | std::string("");
+    pass = doc["password"] | "";
     if (!pass.empty()) needsResave = true;
   }
   // A successfully decoded empty string is a legitimate value; preserve as-is.

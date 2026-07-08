@@ -5,8 +5,7 @@
 
 #include <algorithm>
 
-String WifiCredentialStore::toJson() const {
-  JsonDocument doc;
+void WifiCredentialStore::toJson(JsonDocument& doc) const {
   doc["lastConnectedSsid"] = lastConnectedSsid;
 
   JsonArray arr = doc["credentials"].to<JsonArray>();
@@ -15,33 +14,22 @@ String WifiCredentialStore::toJson() const {
     obj["ssid"] = cred.ssid;
     obj["password_obf"] = obfuscation::obfuscateToBase64(cred.password);
   }
-
-  String json;
-  serializeJson(doc, json);
-  return json;
 }
 
-bool WifiCredentialStore::fromJson(const String& json) {
-  JsonDocument doc;
-  auto error = deserializeJson(doc, json);
-  if (error) {
-    LOG_ERR("WCS", "JSON parse error: %s", error.c_str());
-    return false;
-  }
-
-  lastConnectedSsid = doc["lastConnectedSsid"] | std::string("");
+bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
+  lastConnectedSsid = doc["lastConnectedSsid"] | "";
 
   // Tolerate a missing/invalid 'credentials' key (treat as empty list); only
   // a JSON parse error is fatal. A null JsonArray iterates zero times.
   credentials.clear();
-  JsonArray arr = doc["credentials"].as<JsonArray>();
+  JsonArrayConst arr = doc["credentials"].as<JsonArrayConst>();
   credentials.reserve(std::min(arr.size(), MAX_NETWORKS));
   bool needsResave = false;
 
-  for (JsonObject obj : arr) {
+  for (JsonObjectConst obj : arr) {
     if (credentials.size() >= MAX_NETWORKS) break;
     WifiCredential cred;
-    cred.ssid = obj["ssid"] | std::string("");
+    cred.ssid = obj["ssid"] | "";
     cred.password = extractPassword(obj, needsResave);
     credentials.push_back(cred);
   }

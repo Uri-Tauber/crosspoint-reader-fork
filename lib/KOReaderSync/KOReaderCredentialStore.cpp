@@ -9,33 +9,21 @@ namespace {
 constexpr char DEFAULT_SERVER_URL[] = "https://sync.koreader.rocks:443";
 }  // namespace
 
-String KOReaderCredentialStore::toJson() const {
-  JsonDocument doc;
+void KOReaderCredentialStore::toJson(JsonDocument& doc) const {
   doc["username"] = getUsername();
   doc["password_obf"] = obfuscation::obfuscateToBase64(getPassword());
   doc["serverUrl"] = getServerUrl();
   doc["matchMethod"] = static_cast<uint8_t>(getMatchMethod());
-
-  String json;
-  serializeJson(doc, json);
-  return json;
 }
 
-bool KOReaderCredentialStore::fromJson(const String& json) {
-  JsonDocument doc;
-  auto error = deserializeJson(doc, json);
-  if (error) {
-    LOG_ERR("KRS", "JSON parse error: %s", error.c_str());
-    return false;
-  }
-
-  std::string user = doc["username"] | std::string("");
+bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {
+  std::string user = doc["username"] | "";
 
   bool needsResave = false;
   std::string pass = extractPassword(doc, needsResave);
 
   setCredentials(user, pass);
-  setServerUrl(doc["serverUrl"] | std::string(""));
+  setServerUrl(doc["serverUrl"] | "");
 
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   if (method <= static_cast<uint8_t>(DocumentMatchMethod::BINARY)) {

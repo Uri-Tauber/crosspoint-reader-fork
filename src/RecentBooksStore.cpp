@@ -9,8 +9,7 @@
 #include <algorithm>
 #include <iterator>
 
-String RecentBooksStore::toJson() const {
-  JsonDocument doc;
+void RecentBooksStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["books"].to<JsonArray>();
   for (const auto& book : recentBooks) {
     JsonObject obj = arr.add<JsonObject>();
@@ -19,32 +18,21 @@ String RecentBooksStore::toJson() const {
     obj["author"] = book.author;
     obj["coverBmpPath"] = book.coverBmpPath;
   }
-
-  String json;
-  serializeJson(doc, json);
-  return json;
 }
 
-bool RecentBooksStore::fromJson(const String& json) {
-  JsonDocument doc;
-  auto error = deserializeJson(doc, json);
-  if (error) {
-    LOG_ERR("RBS", "JSON parse error: %s", error.c_str());
-    return false;
-  }
-
+bool RecentBooksStore::fromJson(JsonVariantConst doc) {
   // Tolerate a missing/invalid 'books' key (treat as empty list); only a
   // JSON parse error is fatal. A null JsonArray iterates zero times.
   recentBooks.clear();
-  JsonArray arr = doc["books"].as<JsonArray>();
+  JsonArrayConst arr = doc["books"].as<JsonArrayConst>();
   recentBooks.reserve(std::min(arr.size(), static_cast<size_t>(MAX_RECENT_BOOKS)));
-  for (JsonObject obj : arr) {
+  for (JsonObjectConst obj : arr) {
     if (getCount() >= MAX_RECENT_BOOKS) break;
     RecentBook book;
-    book.path = obj["path"] | std::string("");
-    book.title = obj["title"] | std::string("");
-    book.author = obj["author"] | std::string("");
-    book.coverBmpPath = obj["coverBmpPath"] | std::string("");
+    book.path = obj["path"] | "";
+    book.title = obj["title"] | "";
+    book.author = obj["author"] | "";
+    book.coverBmpPath = obj["coverBmpPath"] | "";
     recentBooks.push_back(book);
   }
 
