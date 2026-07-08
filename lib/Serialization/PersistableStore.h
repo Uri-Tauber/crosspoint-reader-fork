@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <mutex>
 #include <string>
 
 /**
@@ -18,6 +19,19 @@ class PersistableStoreBase {
  protected:
   PersistableStoreBase() = default;
   ~PersistableStoreBase() = default;
+
+  // Serializes saveToFile/loadFromFile across FreeRTOS tasks so the JSON
+  // snapshot cannot tear mid-serialize (a real hazard on dual-core targets).
+  // Derived classes may also lock it when building multi-field snapshots.
+  mutable std::mutex storeMutex;
+
+  // fromJson() implementations call this (instead of saveToFile()) when the
+  // on-disk JSON used a legacy shape that was upgraded in memory.
+  // loadFromFile() performs the save after releasing storeMutex; calling
+  // saveToFile() from inside fromJson() would deadlock on storeMutex.
+  void requestResave() { resaveRequested = true; }
+
+  bool resaveRequested = false;
 
   // Serializes doc and writes it to path (ensures /.crosspoint exists). Logs on failure.
   static bool writeDocToFile(const char* path, const JsonDocument& doc);
@@ -49,6 +63,10 @@ class PersistableStoreBase {
  * `obj["name"] | ""`), never as `| std::string("")` — ArduinoJson's
  * std::string converter drags a per-TU copy of the whole JSON serializer
  * into flash via its serializeJson fallback.
+ *
+ * Concurrency: saveToFile/loadFromFile lock storeMutex, so toJson/fromJson
+ * always run under it. fromJson must signal legacy-shape upgrades with
+ * requestResave(), never by calling saveToFile() directly (deadlock).
  */
 template <typename T>
 class PersistableStore : public PersistableStoreBase {
@@ -67,16 +85,27 @@ class PersistableStore : public PersistableStoreBase {
   }
 
   bool saveToFile() const {
+    std::lock_guard<std::mutex> lock(storeMutex);
     JsonDocument doc;
     static_cast<const T*>(this)->toJson(doc);
     return writeDocToFile(T::getFilePath(), doc);
   }
 
   bool loadFromFile() {
-    JsonDocument doc;
-    if (!readDocFromFile(T::getFilePath(), doc)) {
-      return false;
+    bool ok;
+    {
+      std::lock_guard<std::mutex> lock(storeMutex);
+      resaveRequested = false;
+      JsonDocument doc;
+      if (!readDocFromFile(T::getFilePath(), doc)) {
+        return false;
+      }
+      ok = static_cast<T*>(this)->fromJson(doc.as<JsonVariantConst>());
     }
-    return static_cast<T*>(this)->fromJson(doc.as<JsonVariantConst>());
+    if (ok && resaveRequested) {
+      resaveRequested = false;
+      saveToFile();
+    }
+    return ok;
   }
 };

@@ -1,29 +1,18 @@
 #pragma once
-#include <HalStorage.h>
+#include <ArduinoJson.h>
+#include <Epub/ReaderRenderSpec.h>
+#include <PersistableStore.h>
 
 #include <cstdint>
-#include <iosfwd>
-#include <mutex>
 
-class CrossPointSettings {
+class CrossPointSettings : public PersistableStore<CrossPointSettings> {
  private:
-  mutable std::mutex _mutex;
-
   // Private constructor for singleton
   CrossPointSettings() = default;
 
-  // Static instance
-  static CrossPointSettings instance;
+  friend class PersistableStore<CrossPointSettings>;
 
  public:
-  // Delete copy constructor and assignment
-  CrossPointSettings(const CrossPointSettings&) = delete;
-  CrossPointSettings& operator=(const CrossPointSettings&) = delete;
-
-  // Access the settings mutex for protecting multi-field reads/writes from other cores.
-  // Callers must not re-enter SETTINGS methods that lock _mutex while holding it.
-  std::mutex& getMutex() const { return _mutex; }
-
   enum SLEEP_SCREEN_MODE {
     DARK = 0,
     LIGHT = 1,
@@ -272,11 +261,6 @@ class CrossPointSettings {
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
 
-  ~CrossPointSettings() = default;
-
-  // Get singleton instance
-  static CrossPointSettings& getInstance() { return instance; }
-
   static constexpr uint8_t MIN_SLEEP_TIMEOUT_MINUTES = 1;
   static constexpr uint8_t SLEEP_TIMEOUT_NEVER_MINUTES = 31;
   static constexpr uint8_t MAX_SLEEP_TIMEOUT_MINUTES = SLEEP_TIMEOUT_NEVER_MINUTES;
@@ -292,20 +276,46 @@ class CrossPointSettings {
   }
   int getReaderFontId() const;
 
-  // If count_only is true, returns the number of settings items that would be written.
-  uint8_t writeSettings(HalFile& file, bool count_only = false) const;
+  // Resolved status-bar composition. Built under the store mutex so consumers
+  // get a coherent snapshot even if another task saves/loads concurrently.
+  // Consumers read the spec; only settings editors read the raw fields.
+  struct StatusBarSpec {
+    bool showChapterPageCount;
+    bool showBookProgressPercent;
+    uint8_t titleMode;  // STATUS_BAR_TITLE
+    bool showBattery;
+    bool showBatteryPercent;
+    uint8_t clockMode;  // STATUS_BAR_CLOCK_MODE
+    bool clock12h;
+    uint8_t clockUtcOffsetQ;
+    uint8_t progressBarMode;      // STATUS_BAR_PROGRESS_BAR
+    uint8_t progressBarHeightPx;  // (thickness+1)*2; 0 when the bar is hidden
+    uint8_t xtcMode;              // XTC_STATUS_BAR_MODE
 
-  bool saveToFile() const;
-  bool loadFromFile();
+    bool showsProgressBar() const { return progressBarMode != HIDE_PROGRESS; }
+    bool showsTitle() const { return titleMode != HIDE_TITLE; }
+    bool showsClock() const { return clockMode != STATUS_BAR_CLOCK_HIDE; }
+    // Visibility of the text lane. Clock hardware presence is the caller's
+    // concern: pass halClock.isAvailable(), or true for layout reservation.
+    bool textLaneVisible(bool clockAvailable) const {
+      return showChapterPageCount || showBookProgressPercent || showsTitle() || showBattery ||
+             (showsClock() && clockAvailable);
+    }
+  };
+  StatusBarSpec statusBarSpec() const;
+
+  // Resolved text-rendering configuration for the Epub layout engine, built
+  // under the store mutex. The viewport fields are left zero — they derive
+  // from the renderer/orientation, so the reader fills them in.
+  ReaderRenderSpec readerRenderSpec() const;
+
+  static const char* getFilePath() { return "/.crosspoint/settings.json"; }
+  void toJson(JsonDocument& doc) const;
+  bool fromJson(JsonVariantConst doc);
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
   static uint8_t sleepTimeoutEnumToMinutes(uint8_t legacyValue);
 
- private:
-  bool loadFromBinaryFile();
-  bool migrateLanguageBinaryFile();
-
- public:
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
