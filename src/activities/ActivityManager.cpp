@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <HalPowerManager.h>
+#include <SleepCrumb.h>
 
 #include <algorithm>
 
@@ -115,6 +116,7 @@ void ActivityManager::loop() {
     } else if (pendingActivity) {
       // Current activity has requested a new activity to be launched
       RenderLock lock;
+      SleepCrumb::mark(SleepCrumb::RENDER_LOCK_ACQUIRED);  // no-op outside the sleep sequence
 
       if (pendingAction == PendingAction::Replace) {
         // Destroy the current activity
@@ -124,6 +126,7 @@ void ActivityManager::loop() {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
         }
+        SleepCrumb::mark(SleepCrumb::OLD_ACTIVITY_EXITED);
       } else if (pendingAction == PendingAction::Push) {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));

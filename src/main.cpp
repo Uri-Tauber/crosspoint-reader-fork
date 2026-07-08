@@ -13,6 +13,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <SPI.h>
+#include <SleepCrumb.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
 
@@ -194,6 +195,8 @@ static bool loadSleepFrameBuffer() {
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  SleepCrumb::begin(fromTimeout ? "timeout" : "button", APP_STATE.lastSleepFromReader, SETTINGS.sleepScreen,
+                    powerManager.getBatteryPercentage());
 
   const bool isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
@@ -202,14 +205,17 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.showBootScreen = !isQuickResumeSleep;
 
   APP_STATE.saveToFile();
+  SleepCrumb::mark(SleepCrumb::STATE_SAVED);
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
   activityManager.goToSleep(fromTimeout);
+  SleepCrumb::mark(SleepCrumb::ACTIVITY_TEARDOWN_DONE);
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
+    SleepCrumb::mark(SleepCrumb::FRAME_SAVED);
   }
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
@@ -218,9 +224,11 @@ void enterDeepSleep(bool fromTimeout = false) {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
   }
+  SleepCrumb::mark(SleepCrumb::WIFI_DOWN);
 
   halTiltSensor.deepSleep();
   display.deepSleep();
+  SleepCrumb::mark(SleepCrumb::DISPLAY_SLEEP);
   LOG_DBG("MAIN", "Entering deep sleep");
 
   powerManager.startDeepSleep(gpio);
@@ -301,6 +309,10 @@ void setup() {
 
   HalSystem::checkPanic();
 
+  // Report (to /sleep_debug.txt) a sleep attempt that hung in the previous
+  // session, before any path below can re-enter sleep and start a new trail.
+  SleepCrumb::reportOnBoot();
+
   SETTINGS.loadFromFile();
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
@@ -316,12 +328,14 @@ void setup() {
       LOG_DBG("MAIN", "Verifying power button press duration");
       if (!gpio.verifyPowerButtonWakeup(SETTINGS.getPowerButtonDuration(),
                                         SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP)) {
+        SleepCrumb::begin("wake-verify", false, SETTINGS.sleepScreen, powerManager.getBatteryPercentage());
         powerManager.startDeepSleep(gpio);
       }
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // If USB power caused a cold boot, go back to sleep
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
+      SleepCrumb::begin("usb-power", false, SETTINGS.sleepScreen, powerManager.getBatteryPercentage());
       powerManager.startDeepSleep(gpio);
       break;
     case HalGPIO::WakeupReason::AfterFlash:

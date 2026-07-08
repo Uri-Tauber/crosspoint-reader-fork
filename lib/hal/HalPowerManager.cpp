@@ -7,6 +7,7 @@
 #include <cassert>
 
 #include "HalGPIO.h"
+#include "SleepCrumb.h"
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -61,11 +62,16 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  SleepCrumb::mark(SleepCrumb::POWER_MGR_ENTER);
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
     delay(50);
     gpio.update();
   }
+  // Last stage safely writable: everything after this point tears down the
+  // battery latch, so SD access is off-limits. A trail ending here is a
+  // successful sleep.
+  SleepCrumb::mark(SleepCrumb::FINAL_TEARDOWN);
 
 #ifdef ENABLE_SERIAL_LOG
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral

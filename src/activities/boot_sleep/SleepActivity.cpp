@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <SleepCrumb.h>
 #include <Txt.h>
 #include <Xtc.h>
 
@@ -18,7 +19,12 @@
 
 void SleepActivity::onEnter() {
   Activity::onEnter();
+  SleepCrumb::mark(SleepCrumb::SCREEN_RENDER_START);
+  renderSleepScreen();
+  SleepCrumb::mark(SleepCrumb::SCREEN_RENDER_DONE);
+}
 
+void SleepActivity::renderSleepScreen() const {
   const bool renderQuickResume =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
