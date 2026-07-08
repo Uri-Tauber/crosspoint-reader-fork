@@ -3,6 +3,8 @@
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
+#include <algorithm>
+
 String WifiCredentialStore::toJson() const {
   JsonDocument doc;
   doc["lastConnectedSsid"] = lastConnectedSsid;
@@ -36,6 +38,7 @@ bool WifiCredentialStore::fromJson(const String& json) {
 
   credentials.clear();
   JsonArray arr = doc["credentials"].as<JsonArray>();
+  credentials.reserve(std::min(arr.size(), MAX_NETWORKS));
   bool needsResave = false;
 
   for (JsonObject obj : arr) {

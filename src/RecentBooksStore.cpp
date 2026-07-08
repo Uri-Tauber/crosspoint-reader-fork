@@ -39,6 +39,7 @@ bool RecentBooksStore::fromJson(const String& json) {
   }
   recentBooks.clear();
   JsonArray arr = doc["books"].as<JsonArray>();
+  recentBooks.reserve(std::min(arr.size(), static_cast<size_t>(MAX_RECENT_BOOKS)));
   for (JsonObject obj : arr) {
     if (getCount() >= MAX_RECENT_BOOKS) break;
     RecentBook book;
