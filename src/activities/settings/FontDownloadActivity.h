@@ -47,6 +47,7 @@ class FontDownloadActivity : public Activity {
   enum State {
     WIFI_SELECTION,
     LOADING_MANIFEST,
+    GROUP_LIST,
     FAMILY_LIST,
     DOWNLOADING,
     COMPLETE,
@@ -67,6 +68,17 @@ class FontDownloadActivity : public Activity {
     size_t totalSize = 0;
     bool installed = false;
     bool hasUpdate = false;
+    // Bitmask over scriptGroups_ (bit i set => family covers scriptGroups_[i]).
+    // Derived from the manifest's per-family `scripts` tags at parse time.
+    uint32_t scriptMask = 0;
+  };
+
+  // Script/writing-system group shown on the top-level browser screen. Both
+  // fields come verbatim from the manifest's `scriptGroups` block — the device
+  // holds no hardcoded script list.
+  struct ScriptGroup {
+    std::string tag;
+    std::string label;
   };
 
   State state_ = WIFI_SELECTION;
@@ -76,7 +88,14 @@ class FontDownloadActivity : public Activity {
   // Manifest data
   std::string baseUrl_;
   std::vector<ManifestFamily> families_;
+  std::vector<ScriptGroup> scriptGroups_;
   int selectedIndex_ = 0;
+
+  // Group screen: selectedGroupIndex_ 0 == "All fonts", otherwise
+  // scriptGroups_[selectedGroupIndex_ - 1]. filteredIndices_ holds the indices
+  // into families_ visible for the currently entered group.
+  int selectedGroupIndex_ = 0;
+  std::vector<int> filteredIndices_;
 
   // Download progress
   size_t currentFileIndex_ = 0;
@@ -101,8 +120,17 @@ class FontDownloadActivity : public Activity {
   bool isSelectedFamilyDeletable() const;
   void promptDeleteSelectedFamily();
   void onDeleteConfirmationResult(const ActivityResult& result);
-  int familyIndexFromList(int listIndex) const { return listIndex - specialRowCount(); }
+  // Maps a FAMILY_LIST row (after special rows) to an index into families_
+  // through the current group's filteredIndices_. Returns -1 if out of range.
+  int familyIndexFromList(int listIndex) const;
   int listItemCount() const;
+
+  // Group screen helpers.
+  bool hasGroupScreen() const { return !scriptGroups_.empty(); }
+  int groupListItemCount() const { return 1 + static_cast<int>(scriptGroups_.size()); }
+  int groupMemberCount(int scriptGroupIndex) const;
+  void buildFilteredIndices(int groupListIndex);
+  void enterGroup(int groupListIndex);
   size_t totalDownloadSize() const;
   size_t totalUpdateSize() const;
   static std::string formatSize(size_t bytes);
