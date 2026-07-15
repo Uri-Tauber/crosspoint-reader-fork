@@ -14,6 +14,8 @@
 #
 # groups:  ordered list of script groups shown on device. `label` is displayed
 #          verbatim (device has no translation for these; see FontDownloadActivity).
+#          At most 32 groups: the firmware tracks membership in a 32-bit
+#          scriptMask (interval_registry.py enforces this at build time).
 # presets: name -> { ranges: [[start, end], ...] (inclusive, hex ok),
 #                    group: <tag> (optional; omit for coverage-only presets such
 #                                  as punctuation/symbols that are not a script) }

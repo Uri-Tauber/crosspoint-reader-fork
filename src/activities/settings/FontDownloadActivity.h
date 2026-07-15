@@ -81,6 +81,9 @@ class FontDownloadActivity : public Activity {
     std::string label;
   };
 
+  // Width of ManifestFamily::scriptMask; manifest groups beyond this are ignored.
+  static constexpr size_t MAX_SCRIPT_GROUPS = 32;
+
   State state_ = WIFI_SELECTION;
   FontInstaller fontInstaller_;
   ButtonNavigator buttonNavigator_;
@@ -96,6 +99,9 @@ class FontDownloadActivity : public Activity {
   // into families_ visible for the currently entered group.
   int selectedGroupIndex_ = 0;
   std::vector<int> filteredIndices_;
+  // Per-group family counts, precomputed at parse time (group membership never
+  // changes after the manifest is parsed).
+  uint16_t groupCounts_[MAX_SCRIPT_GROUPS] = {};
 
   // Download progress
   size_t currentFileIndex_ = 0;
@@ -124,6 +130,13 @@ class FontDownloadActivity : public Activity {
   // through the current group's filteredIndices_. Returns -1 if out of range.
   int familyIndexFromList(int listIndex) const;
   int listItemCount() const;
+  // Registers next/previous release + continuous handlers that move `index`
+  // over a list of `listSize` rows. `index` is captured by reference; safe
+  // because ButtonNavigator invokes callbacks synchronously without storing them.
+  void bindListNavigation(int& index, int listSize);
+  // Re-enters FAMILY_LIST, clamping selectedIndex_: special rows can disappear
+  // after a download/delete, shrinking the list below a stale selection.
+  void returnToFamilyList();
 
   // Group screen helpers.
   bool hasGroupScreen() const { return !scriptGroups_.empty(); }

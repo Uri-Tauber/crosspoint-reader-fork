@@ -8,6 +8,8 @@
 #include <WiFi.h>
 #include <esp_rom_crc.h>
 
+#include <algorithm>
+
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
@@ -121,12 +123,15 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   fontInstaller_.refreshRegistry();
 
   // Parse the top-level script-group table first so each family's `scripts`
-  // tags can be resolved to bits below. Capped at 32 groups (scriptMask width).
+  // tags can be resolved to bits below. Capped at MAX_SCRIPT_GROUPS (scriptMask width).
   scriptGroups_.clear();
   JsonArray groupsArr = doc["scriptGroups"].as<JsonArray>();
   scriptGroups_.reserve(groupsArr.size());
   for (JsonObject gObj : groupsArr) {
-    if (scriptGroups_.size() >= 32) break;
+    if (scriptGroups_.size() >= MAX_SCRIPT_GROUPS) {
+      LOG_ERR("FONT", "Manifest declares more than %zu script groups; extra groups ignored", MAX_SCRIPT_GROUPS);
+      break;
+    }
     ScriptGroup group;
     group.tag = gObj["tag"] | "";
     group.label = gObj["label"] | "";
@@ -204,6 +209,13 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     families_.push_back(std::move(family));
   }
 
+  std::fill(std::begin(groupCounts_), std::end(groupCounts_), 0);
+  for (const auto& f : families_) {
+    for (size_t gi = 0; gi < scriptGroups_.size(); gi++) {
+      if (f.scriptMask & (1u << gi)) groupCounts_[gi]++;
+    }
+  }
+
   LOG_DBG("FONT", "Manifest loaded: %zu families", families_.size());
   return true;
 }
@@ -274,12 +286,7 @@ int FontDownloadActivity::familyIndexFromList(int listIndex) const {
 
 int FontDownloadActivity::groupMemberCount(int scriptGroupIndex) const {
   if (scriptGroupIndex < 0 || scriptGroupIndex >= static_cast<int>(scriptGroups_.size())) return 0;
-  const uint32_t bit = 1u << scriptGroupIndex;
-  int count = 0;
-  for (const auto& f : families_) {
-    if (f.scriptMask & bit) count++;
-  }
-  return count;
+  return groupCounts_[scriptGroupIndex];
 }
 
 void FontDownloadActivity::buildFilteredIndices(int groupListIndex) {
@@ -302,6 +309,34 @@ void FontDownloadActivity::enterGroup(int groupListIndex) {
   selectedGroupIndex_ = groupListIndex;
   selectedIndex_ = 0;
   state_ = FAMILY_LIST;
+}
+
+void FontDownloadActivity::bindListNavigation(int& index, const int listSize) {
+  const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
+
+  buttonNavigator_.onNextRelease([this, &index, listSize] {
+    index = ButtonNavigator::nextIndex(index, listSize);
+    requestUpdate();
+  });
+  buttonNavigator_.onPreviousRelease([this, &index, listSize] {
+    index = ButtonNavigator::previousIndex(index, listSize);
+    requestUpdate();
+  });
+  buttonNavigator_.onNextContinuous([this, &index, listSize, pageItems] {
+    index = ButtonNavigator::nextPageIndex(index, listSize, pageItems);
+    requestUpdate();
+  });
+  buttonNavigator_.onPreviousContinuous([this, &index, listSize, pageItems] {
+    index = ButtonNavigator::previousPageIndex(index, listSize, pageItems);
+    requestUpdate();
+  });
+}
+
+void FontDownloadActivity::returnToFamilyList() {
+  RenderLock lock(*this);
+  state_ = FAMILY_LIST;
+  const int maxIndex = listItemCount() - 1;
+  if (selectedIndex_ > maxIndex) selectedIndex_ = maxIndex > 0 ? maxIndex : 0;
 }
 
 size_t FontDownloadActivity::totalDownloadSize() const {
@@ -472,7 +507,12 @@ void FontDownloadActivity::onDeleteConfirmationResult(const ActivityResult& resu
     return;
   }
 
-  auto& family = families_[familyIndexFromList(selectedIndex_)];
+  const int familyIndex = familyIndexFromList(selectedIndex_);
+  if (familyIndex < 0) {
+    requestUpdate();
+    return;
+  }
+  auto& family = families_[familyIndex];
 
   if (fontInstaller_.deleteFamily(family.name.c_str()) != FontInstaller::Error::OK) {
     RenderLock lock(*this);
@@ -503,25 +543,7 @@ void FontDownloadActivity::loop() {
       return;
     }
 
-    const int listSize = groupListItemCount();
-    const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
-
-    buttonNavigator_.onNextRelease([this, listSize] {
-      selectedGroupIndex_ = ButtonNavigator::nextIndex(selectedGroupIndex_, listSize);
-      requestUpdate();
-    });
-    buttonNavigator_.onPreviousRelease([this, listSize] {
-      selectedGroupIndex_ = ButtonNavigator::previousIndex(selectedGroupIndex_, listSize);
-      requestUpdate();
-    });
-    buttonNavigator_.onNextContinuous([this, listSize, pageItems] {
-      selectedGroupIndex_ = ButtonNavigator::nextPageIndex(selectedGroupIndex_, listSize, pageItems);
-      requestUpdate();
-    });
-    buttonNavigator_.onPreviousContinuous([this, listSize, pageItems] {
-      selectedGroupIndex_ = ButtonNavigator::previousPageIndex(selectedGroupIndex_, listSize, pageItems);
-      requestUpdate();
-    });
+    bindListNavigation(selectedGroupIndex_, groupListItemCount());
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       enterGroup(selectedGroupIndex_);
@@ -541,28 +563,7 @@ void FontDownloadActivity::loop() {
       return;
     }
 
-    const int listSize = listItemCount();
-    const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
-
-    buttonNavigator_.onNextRelease([this, listSize] {
-      selectedIndex_ = ButtonNavigator::nextIndex(selectedIndex_, listSize);
-      requestUpdate();
-    });
-
-    buttonNavigator_.onPreviousRelease([this, listSize] {
-      selectedIndex_ = ButtonNavigator::previousIndex(selectedIndex_, listSize);
-      requestUpdate();
-    });
-
-    buttonNavigator_.onNextContinuous([this, listSize, pageItems] {
-      selectedIndex_ = ButtonNavigator::nextPageIndex(selectedIndex_, listSize, pageItems);
-      requestUpdate();
-    });
-
-    buttonNavigator_.onPreviousContinuous([this, listSize, pageItems] {
-      selectedIndex_ = ButtonNavigator::previousPageIndex(selectedIndex_, listSize, pageItems);
-      requestUpdate();
-    });
+    bindListNavigation(selectedIndex_, listItemCount());
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       if (!filteredIndices_.empty()) {
@@ -582,7 +583,9 @@ void FontDownloadActivity::loop() {
           }
           updateAll();
         } else {
-          auto& family = families_[familyIndexFromList(selectedIndex_)];
+          const int familyIndex = familyIndexFromList(selectedIndex_);
+          if (familyIndex < 0) return;
+          auto& family = families_[familyIndex];
           if (!family.installed || family.hasUpdate) {
             currentFileIndex_ = 0;
             currentFileTotal_ = family.files.size();
@@ -599,18 +602,12 @@ void FontDownloadActivity::loop() {
   } else if (state_ == COMPLETE) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
         mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      {
-        RenderLock lock(*this);
-        state_ = FAMILY_LIST;
-      }
+      returnToFamilyList();
       requestUpdate();
     }
   } else if (state_ == ERROR) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      {
-        RenderLock lock(*this);
-        state_ = FAMILY_LIST;
-      }
+      returnToFamilyList();
       requestUpdate();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       if (downloadingFamilyIndex_ >= 0 && downloadingFamilyIndex_ < static_cast<int>(families_.size())) {
@@ -618,10 +615,7 @@ void FontDownloadActivity::loop() {
         requestUpdateAndWait();
         return;
       } else {
-        {
-          RenderLock lock(*this);
-          state_ = FAMILY_LIST;
-        }
+        returnToFamilyList();
         requestUpdate();
       }
     }
@@ -650,14 +644,14 @@ void FontDownloadActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   // Within a script group, show that group's name as the header subtitle.
-  std::string headerSubtitle;
+  const char* headerSubtitle = nullptr;
   if (state_ == FAMILY_LIST && hasGroupScreen()) {
     headerSubtitle = (selectedGroupIndex_ >= 1 && selectedGroupIndex_ <= static_cast<int>(scriptGroups_.size()))
-                         ? scriptGroups_[selectedGroupIndex_ - 1].label
-                         : std::string(tr(STR_ALL_FONTS));
+                         ? scriptGroups_[selectedGroupIndex_ - 1].label.c_str()
+                         : tr(STR_ALL_FONTS);
   }
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FONT_BROWSER),
-                 headerSubtitle.empty() ? nullptr : headerSubtitle.c_str());
+                 headerSubtitle);
 
   const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const auto contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
@@ -684,7 +678,9 @@ void FontDownloadActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state_ == FAMILY_LIST) {
-    if (families_.empty()) {
+    // The visible rows come from filteredIndices_, not families_ — an entered
+    // group can be empty even when the manifest has families.
+    if (filteredIndices_.empty()) {
       renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_NO_FONTS_AVAILABLE));
       const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

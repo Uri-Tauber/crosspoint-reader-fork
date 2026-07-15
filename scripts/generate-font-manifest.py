@@ -30,7 +30,18 @@ from pathlib import Path
 # files in lib/EpdFont/scripts/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib" / "EpdFont" / "scripts"))
 from cpfont_version import CPFONT_VERSION, FONTS_MANIFEST_VERSION
-from interval_registry import SCRIPT_GROUPS, scripts_for_presets
+
+# interval_registry needs pyyaml at import time; degrade gracefully without it
+# (matching load_families_from_yaml): the manifest is still generated, just with
+# no script grouping — every family appears only under "All fonts" on device.
+try:
+    from interval_registry import SCRIPT_GROUPS, scripts_for_presets
+except ImportError:
+    print("WARNING: pyyaml not installed, manifest will have no script groups", file=sys.stderr)
+    SCRIPT_GROUPS = []
+
+    def scripts_for_presets(preset_names) -> list[str]:
+        return []
 
 # --- .cpfont binary format constants ---
 # Global header: 8s magic, H version, H flags, B styleCount, 19x reserved
