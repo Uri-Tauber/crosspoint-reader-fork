@@ -27,7 +27,7 @@ constexpr int bookmarkStatusIconGap = 4;
 constexpr int bookmarkStatusIconTopCrop = 2;
 
 bool statusBarTextLaneVisible() {
-  return SETTINGS.statusBarChapterPageCount || SETTINGS.statusBarBookProgressPercentage ||
+  return SETTINGS.statusBarPageCount != CrossPointSettings::PAGE_COUNT_HIDE || SETTINGS.statusBarBookProgressPercentage ||
          SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE || SETTINGS.statusBarBattery ||
          (SETTINGS.statusBarClock && halClock.isAvailable());
 }
@@ -765,14 +765,16 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   int leftClusterWidth = 0;
   int rightClusterWidth = 0;
 
-  if (SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount) {
+  const bool showPageCount = SETTINGS.statusBarPageCount != CrossPointSettings::PAGE_COUNT_HIDE;
+
+  if (SETTINGS.statusBarBookProgressPercentage || showPageCount) {
     // Right aligned text for progress counter
     char progressStr[32];
 
     // Prefix the page count with "~" while a still-building spine only yields an estimated total.
     const char* estimatePrefix = pageCountEstimated ? "~" : "";
 
-    if (SETTINGS.statusBarBookProgressPercentage && SETTINGS.statusBarChapterPageCount) {
+    if (SETTINGS.statusBarBookProgressPercentage && showPageCount) {
       snprintf(progressStr, sizeof(progressStr), "%s%d/%d  %.0f%%", estimatePrefix, currentPage, pageCount,
                bookProgress);
     } else if (SETTINGS.statusBarBookProgressPercentage) {

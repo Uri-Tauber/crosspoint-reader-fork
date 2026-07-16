@@ -1511,9 +1511,105 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 void EpubReaderActivity::renderStatusBar() const {
   // Calculate progress in book. Use the estimated total while a giant spine is still building so
   // "page X of Y" and the progress bar don't read off the small build watermark.
-  const int currentPage = section->currentPage + 1;
   const float pageCount = section->estimatedTotalPages();
-  const float sectionChapterProg = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) : 0;
+  int currentPage = section->currentPage + 1;
+  float totalPages = pageCount;
+  bool pageCountEstimated = section->isBuilding();
+
+  if (SETTINGS.statusBarPageCount == CrossPointSettings::PAGE_COUNT_BOOK) {
+    uint32_t totalBuiltPages = 0;
+    uint32_t totalBuiltBytes = 0;
+
+    // Calculate bytes and pages for all spines using in-memory cache
+    const int spineCount = epub->getSpineItemsCount();
+    for (int i = 0; i < spineCount; i++) {
+      int prevChapterSize = (i >= 1) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
+      int curChapterSize = epub->getCumulativeSpineItemSize(i) - prevChapterSize;
+
+      uint16_t spinePages = 0;
+      if (i == currentSpineIndex) {
+        spinePages = section->pageCount; // Only exact laid out pages
+        totalBuiltBytes += curChapterSize;
+      } else {
+        spinePages = epub->getSpineItem(i).pageCount;
+        if (spinePages > 0) {
+          totalBuiltBytes += curChapterSize;
+        } else {
+          pageCountEstimated = true;
+        }
+      }
+      totalBuiltPages += spinePages;
+    }
+
+    // Average bytes per page based on built pages. We subtract the current chapter from the average calculation
+    // if it is still building so we do not skew the average with an incomplete page count and full chapter size.
+    if (section->isBuilding()) {
+        int prevChapterSize = (currentSpineIndex >= 1) ? epub->getCumulativeSpineItemSize(currentSpineIndex - 1) : 0;
+        int curChapterSize = epub->getCumulativeSpineItemSize(currentSpineIndex) - prevChapterSize;
+
+        if (totalBuiltBytes >= curChapterSize) {
+           totalBuiltBytes -= curChapterSize;
+        } else {
+           totalBuiltBytes = 0;
+        }
+
+        if (totalBuiltPages >= section->pageCount) {
+           totalBuiltPages -= section->pageCount;
+        } else {
+           totalBuiltPages = 0;
+        }
+    }
+
+    float avgBytesPerPage = (totalBuiltPages > 0) ? static_cast<float>(totalBuiltBytes) / totalBuiltPages : 0;
+    if (avgBytesPerPage == 0 && section->estimatedTotalPages() > 0) {
+      int prevChapterSize = (currentSpineIndex >= 1) ? epub->getCumulativeSpineItemSize(currentSpineIndex - 1) : 0;
+      int curChapterSize = epub->getCumulativeSpineItemSize(currentSpineIndex) - prevChapterSize;
+      avgBytesPerPage = static_cast<float>(curChapterSize) / section->estimatedTotalPages();
+    }
+
+    uint32_t estimatedTotalPages = 0;
+    uint32_t estimatedCurrentPage = 0;
+
+    for (int i = 0; i < spineCount; i++) {
+      int prevChapterSize = (i >= 1) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
+      int curChapterSize = epub->getCumulativeSpineItemSize(i) - prevChapterSize;
+
+      uint16_t spinePages = 0;
+      bool isBuilt = false;
+
+      if (i == currentSpineIndex) {
+         spinePages = section->estimatedTotalPages(); // use estimated for current
+         isBuilt = !section->isBuilding();
+      } else {
+        spinePages = epub->getSpineItem(i).pageCount;
+        if (spinePages > 0) {
+          isBuilt = true;
+        }
+      }
+
+      if (!isBuilt) {
+        if (avgBytesPerPage > 0) {
+          spinePages = static_cast<uint16_t>(curChapterSize / avgBytesPerPage);
+        } else {
+          // Fallback if no pages are built yet across the whole book
+          spinePages = 0;
+        }
+      }
+
+      if (i < currentSpineIndex) {
+        estimatedCurrentPage += spinePages;
+      } else if (i == currentSpineIndex) {
+        estimatedCurrentPage += section->currentPage + 1;
+      }
+
+      estimatedTotalPages += spinePages;
+    }
+
+    currentPage = estimatedCurrentPage;
+    totalPages = estimatedTotalPages;
+  }
+
+  const float sectionChapterProg = (pageCount > 0) ? (static_cast<float>(section->currentPage + 1) / pageCount) : 0;
   const float bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg) * 100;
 
   std::string title;
@@ -1543,8 +1639,8 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub->getTitle();
   }
 
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, currentPageBookmarked,
-                    section->isBuilding());
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, totalPages, title, 0, textYOffset, true, currentPageBookmarked,
+                    pageCountEstimated);
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
