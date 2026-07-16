@@ -102,6 +102,9 @@ class ActivityManager {
 
   bool preventAutoSleep() const;
   bool isReaderActivity() const;
+  // Name of the running activity, or "none". Used by the sleep log to tell a
+  // reader sleep from a menu sleep.
+  const char* currentActivityName() const;
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
 

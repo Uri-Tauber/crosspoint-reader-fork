@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <HalPowerManager.h>
+#include <SleepCrumb.h>
 
 #include <algorithm>
 
@@ -117,6 +118,9 @@ void ActivityManager::loop() {
       RenderLock lock;
 
       if (pendingAction == PendingAction::Replace) {
+        // Reached only once RenderLock is held: if a sleep record stops at
+        // STATE_SAVED, the wedge is in acquiring that lock, not in onExit().
+        SleepCrumb::mark(SleepCrumb::ACT_EXIT_START);
         // Destroy the current activity
         exitActivity(lock);
         // Clear the stack
@@ -124,6 +128,7 @@ void ActivityManager::loop() {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
         }
+        SleepCrumb::mark(SleepCrumb::ACT_EXIT_DONE);
       } else if (pendingAction == PendingAction::Push) {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));
@@ -249,6 +254,10 @@ void ActivityManager::popActivity() {
 }
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
+
+const char* ActivityManager::currentActivityName() const {
+  return currentActivity ? currentActivity->name.c_str() : "none";
+}
 
 bool ActivityManager::isReaderActivity() const {
   return std::any_of(stackActivities.begin(), stackActivities.end(),

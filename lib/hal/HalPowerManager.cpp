@@ -7,6 +7,7 @@
 #include <cassert>
 
 #include "HalGPIO.h"
+#include "SleepCrumb.h"
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -61,11 +62,13 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  SleepCrumb::mark(SleepCrumb::PM_ENTER);
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
     delay(50);
     gpio.update();
   }
+  SleepCrumb::mark(SleepCrumb::BTN_RELEASED);
 
 #ifdef ENABLE_SERIAL_LOG
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
@@ -74,6 +77,12 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // (which doesn't expose end()).
   logSerial.end();
 #endif
+  SleepCrumb::mark(SleepCrumb::SERIAL_DOWN);
+
+  // Last durable record. Everything below either cuts our own power or isolates
+  // the SD SPI pins, so no write can be trusted past this point — the next
+  // boot's verdict is what reports on the window below.
+  SleepCrumb::mark(SleepCrumb::PRE_LATCH);
 
   // Pre-sleep routines from the original firmware
   // GPIO13 is connected to battery latch MOSFET, we need to make sure it's low during sleep
@@ -92,6 +101,11 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
   // Enter Deep Sleep
   esp_deep_sleep_start();
+
+  // Unreachable: esp_deep_sleep_start() does not return. If it ever does, the
+  // SD pins are already isolated so this write will most likely fail — it costs
+  // nothing to try, and the next boot's verdict catches it either way.
+  SleepCrumb::mark(SleepCrumb::SLEEP_RETURNED);
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {
