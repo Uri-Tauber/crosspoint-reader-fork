@@ -18,7 +18,7 @@ namespace {
 // Menu items in their natural order. Clock entries are appended only when the
 // DS3231 RTC is present so X4 devices don't see them at all.
 enum MenuItem {
-  ITEM_CHAPTER_PAGE_COUNT = 0,
+  ITEM_PAGE_COUNT = 0,
   ITEM_BOOK_PROGRESS_PERCENTAGE,
   ITEM_PROGRESS_BAR,
   ITEM_PROGRESS_BAR_THICKNESS,
@@ -36,7 +36,7 @@ constexpr int BASE_MENU_ITEMS = ITEM_CLOCK;  // Items shown on every device
 constexpr int FULL_MENU_ITEMS = ITEM_COUNT;  // Items shown when RTC is available
 
 const StrId menuNames[FULL_MENU_ITEMS] = {
-    StrId::STR_CHAPTER_PAGE_COUNT,
+    StrId::STR_PAGE_COUNT,
     StrId::STR_BOOK_PROGRESS_PERCENTAGE,
     StrId::STR_PROGRESS_BAR,
     StrId::STR_PROGRESS_BAR_THICKNESS,
@@ -66,6 +66,9 @@ std::string formatUtcOffset(uint8_t biasedQ) {
 }
 constexpr int PROGRESS_BAR_ITEMS = 3;
 const StrId progressBarNames[PROGRESS_BAR_ITEMS] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE};
+
+constexpr int PAGE_COUNT_ITEMS = 3;
+const StrId pageCountNames[PAGE_COUNT_ITEMS] = {StrId::STR_CHAPTER, StrId::STR_BOOK, StrId::STR_HIDE};
 
 constexpr int PROGRESS_BAR_THICKNESS_ITEMS = 3;
 const StrId progressBarThicknessNames[PROGRESS_BAR_THICKNESS_ITEMS] = {
@@ -162,9 +165,13 @@ void StatusBarSettingsActivity::loop() {
 
 void StatusBarSettingsActivity::handleSelection() {
   switch (selectedIndex) {
-    case ITEM_CHAPTER_PAGE_COUNT:
-      SETTINGS.statusBarChapterPageCount = (SETTINGS.statusBarChapterPageCount + 1) % 2;
-      break;
+    case ITEM_PAGE_COUNT:
+      optionPopup.show(StrId::STR_PAGE_COUNT, pageCountNames, PAGE_COUNT_ITEMS, SETTINGS.statusBarPageCount,
+                       [this](int idx) {
+                         SETTINGS.statusBarPageCount = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_BOOK_PROGRESS_PERCENTAGE:
       SETTINGS.statusBarBookProgressPercentage = (SETTINGS.statusBarBookProgressPercentage + 1) % 2;
       break;
@@ -235,8 +242,8 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
       [](int index) { return std::string(I18N.get(menuNames[index])); }, nullptr, nullptr,
       [](int index) -> std::string {
         switch (index) {
-          case ITEM_CHAPTER_PAGE_COUNT:
-            return SETTINGS.statusBarChapterPageCount ? tr(STR_SHOW) : tr(STR_HIDE);
+          case ITEM_PAGE_COUNT:
+            return I18N.get(pageCountNames[SETTINGS.statusBarPageCount]);
           case ITEM_BOOK_PROGRESS_PERCENTAGE:
             return SETTINGS.statusBarBookProgressPercentage ? tr(STR_SHOW) : tr(STR_HIDE);
           case ITEM_PROGRESS_BAR:
