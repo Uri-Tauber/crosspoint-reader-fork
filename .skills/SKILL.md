@@ -437,6 +437,48 @@ void onExit()   { /* free: vTaskDelete, free buffer, close member FsFiles */ Act
 
 **Critical**: Free resources in reverse order. Delete tasks BEFORE activity destruction.
 
+### The RenderLock Rule (activity state is shared between two tasks)
+
+**Source**: [src/activities/ActivityManager.cpp:45-65](../src/activities/ActivityManager.cpp) (render task), [ActivityManager.cpp:77](../src/activities/ActivityManager.cpp) (no lock in `loop()`)
+
+There are exactly **two** application tasks, and this is the single most common source of crashes in this codebase:
+
+| Task | Runs | Holds RenderLock? |
+|------|------|-------------------|
+| `loopTask` (Arduino) | `ActivityManager::loop()` → `Activity::loop()`, `onEnter()`, `onExit()`, result handlers, popup callbacks | **No** — by design |
+| `ActivityManagerRender` | `Activity::render(RenderLock&&)` | Yes, for the whole render |
+
+Both are pinned to core 1 at priority 1 (see `ActivityManager.cpp:25-36`), so they **preempt each other** at any instruction — on single-core ESP32-C3 exactly as on dual-core ESP32-S3. This is not a dual-core-only concern.
+
+> **RULE: any activity code reached from `loop()`, `onEnter()`, `onExit()`, a result handler, or a callback that mutates state which `render()` reads MUST hold a `RenderLock`.**
+
+The render task holds the lock for hundreds of ms (`drawList` + `displayBuffer()`), while `loop()` re-enters every ~10 ms — so the window is wide, not theoretical.
+
+**What counts as "mutates state `render()` reads"** — in order of danger:
+1. **Containers**: `clear()`, `swap()`, `push_back()`, reassignment of any `std::vector`/`std::string`/`std::map` that `render()` iterates or subscripts. This frees memory the render task is dereferencing → `LoadProhibited`/`StoreProhibited` panic. **Always a crash, never a stale pixel.**
+2. **Owning pointers**: `delete`, `reset()`, or replacing anything `render()` dereferences (fonts, sections, pages).
+3. **Index/count pairs that must agree**: e.g. a container pointer plus its element count — an unlocked pair lets `render()` index a new container with an old count.
+4. Single aligned scalars (one `int`/`bool`) are a benign tear — worst case one stale frame. Not worth a lock on their own.
+
+```cpp
+// WRONG — frees the strings render() is drawing:
+void MyActivity::reload() {
+  items.clear();
+  items.push_back(...);
+}
+
+// CORRECT:
+void MyActivity::reload() {
+  RenderLock lock;   // render() subscripts items on the render task
+  items.clear();
+  items.push_back(...);
+}
+```
+
+**Release the lock before** starting/finishing another activity, or before any call that itself takes a `RenderLock` — `renderingMutex` is **not** recursive (`ActivityManager.h:71`), so re-entry deadlocks. Use `lock.unlock()` for the tail of a function.
+
+**Lock ordering**: `RenderLock` → `storageMutex`. Never the reverse. Holding a `RenderLock` across SD I/O is fine and expected.
+
 ### FreeRTOS Task Guidelines
 
 **Source**: [src/activities/util/KeyboardEntryActivity.cpp:45-50](../src/activities/util/KeyboardEntryActivity.cpp)

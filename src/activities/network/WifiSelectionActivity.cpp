@@ -91,10 +91,15 @@ void WifiSelectionActivity::onExit() {
 }
 
 void WifiSelectionActivity::startWifiScan(const bool autoScan) {
-  autoConnecting = autoScan;
-  manualNetworkListRequested = false;
-  state = WifiSelectionState::SCANNING;
-  networks.clear();
+  {
+    // render() walks networks on the render task; loop() holds no RenderLock
+    // (ActivityManager.cpp:77), so clearing it here frees the ssid strings mid-draw.
+    RenderLock lock;
+    autoConnecting = autoScan;
+    manualNetworkListRequested = false;
+    state = WifiSelectionState::SCANNING;
+    networks.clear();
+  }
   requestUpdate();
 
   // Set WiFi mode to station
@@ -115,9 +120,12 @@ void WifiSelectionActivity::processWifiScanResults() {
   }
 
   if (scanResult == WIFI_SCAN_FAILED) {
-    networks.clear();
-    realNetworkCount = 0;
-    appendHiddenNetworkEntry();
+    {
+      RenderLock lock;  // see startWifiScan(): render() walks networks
+      networks.clear();
+      realNetworkCount = 0;
+      appendHiddenNetworkEntry();
+    }
     autoConnecting = false;
     manualNetworkListRequested = false;
     state = WifiSelectionState::NETWORK_LIST;
@@ -126,7 +134,9 @@ void WifiSelectionActivity::processWifiScanResults() {
     return;
   }
 
-  // Scan complete, process results — deduplicate in-place, keeping strongest signal
+  // Scan complete, process results — deduplicate in-place, keeping strongest signal.
+  // Held across the whole rebuild: render() must never observe a half-built list.
+  RenderLock scanResultLock;
   networks.clear();
   networks.reserve(scanResult);
 
@@ -167,6 +177,7 @@ void WifiSelectionActivity::processWifiScanResults() {
   appendHiddenNetworkEntry();
 
   WiFi.scanDelete();
+  scanResultLock.unlock();  // the list is stable from here; don't hold across a connect attempt
 
   if (autoConnecting && !manualNetworkListRequested && tryNextSavedNetworkFromScan()) {
     return;

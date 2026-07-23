@@ -191,9 +191,14 @@ void FileBrowserActivity::loop() {
   // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
   if (mode == Mode::Books && mappedInput.isPressed(MappedInputManager::Button::Back) &&
       mappedInput.getHeldTime() >= GO_HOME_MS && basepath != "/" && !lockLongPressBack) {
-    basepath = "/";
-    loadFiles();
-    selectorIndex = 0;
+    {
+      // render() runs on the render task and reads basepath + files; loop() holds no
+      // RenderLock of its own (ActivityManager.cpp:77), so guard every mutation here.
+      RenderLock lock;
+      basepath = "/";
+      loadFiles();
+      selectorIndex = 0;
+    }
     requestUpdate();
     return;
   }
@@ -247,12 +252,16 @@ void FileBrowserActivity::loop() {
           LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
           if (removeDirFile(fullPath)) {
             LOG_DBG("FileBrowser", "Deleted successfully");
-            loadFiles();
-            if (files.empty()) {
-              selectorIndex = 0;
-            } else if (selectorIndex >= files.size()) {
-              // Move selection to the new "last" item
-              selectorIndex = files.size() - 1;
+            {
+              // Result handlers run unlocked (ActivityManager.cpp:115), so guard the rebuild.
+              RenderLock lock;
+              loadFiles();
+              if (files.empty()) {
+                selectorIndex = 0;
+              } else if (selectorIndex >= files.size()) {
+                // Move selection to the new "last" item
+                selectorIndex = files.size() - 1;
+              }
             }
 
             requestUpdate(true);
@@ -270,15 +279,20 @@ void FileBrowserActivity::loop() {
       return;
     } else {
       // --- SHORT PRESS ACTION: OPEN/NAVIGATE ---
+      // render() reads basepath and files on the render task; guard both mutations.
+      RenderLock lock;
       if (basepath.back() != '/') basepath += "/";
 
       if (isDirectory) {
         basepath += entry.substr(0, entry.length() - 1);
         loadFiles();
         selectorIndex = 0;
+        lock.unlock();
         requestUpdate();
       } else {
-        onSelectBook(basepath + entry);
+        const std::string bookPath = basepath + entry;
+        lock.unlock();  // onSelectBook launches another activity; don't hold the lock across it
+        onSelectBook(bookPath);
       }
     }
     return;
@@ -302,14 +316,17 @@ void FileBrowserActivity::loop() {
     if (mappedInput.getHeldTime() < GO_HOME_MS) {
       if (basepath != "/") {
         const std::string oldPath = basepath;
+        {
+          // render() reads basepath and files on the render task; guard the whole rebuild.
+          RenderLock lock;
+          basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
+          if (basepath.empty()) basepath = "/";
+          loadFiles();
 
-        basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
-        if (basepath.empty()) basepath = "/";
-        loadFiles();
-
-        const auto pos = oldPath.find_last_of('/');
-        const std::string dirName = oldPath.substr(pos + 1) + "/";
-        selectorIndex = findEntry(dirName);
+          const auto pos = oldPath.find_last_of('/');
+          const std::string dirName = oldPath.substr(pos + 1) + "/";
+          selectorIndex = findEntry(dirName);
+        }
 
         requestUpdate();
       } else if (mode == Mode::PickFirmware) {

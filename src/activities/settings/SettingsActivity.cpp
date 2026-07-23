@@ -31,6 +31,12 @@ const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DIS
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
 
 void SettingsActivity::rebuildSettingsLists() {
+  // render() dereferences currentSettings and indexes it with settingsCount on the
+  // render task. loop() and the popup callbacks that reach here hold no RenderLock
+  // (ActivityManager.cpp:77), so tearing the lists down unguarded frees the strings
+  // and std::functions that render() is walking. Hold the lock for the whole rebuild.
+  RenderLock lock;
+
   displaySettings.clear();
   readerSettings.clear();
   controlsSettings.clear();
@@ -133,6 +139,9 @@ void SettingsActivity::loop() {
   bool hasChangedCategory = false;
 
   auto applyCategorySelection = [this] {
+    // currentSettings and settingsCount must change together as seen by render(),
+    // or it indexes the new list with the old count.
+    RenderLock lock;
     switch (selectedCategoryIndex) {
       case 0:
         currentSettings = &displaySettings;

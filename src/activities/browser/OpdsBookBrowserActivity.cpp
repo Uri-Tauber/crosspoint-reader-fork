@@ -287,10 +287,15 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     return;
   }
 
-  searchTemplate = parser.getSearchTemplate();
   const auto& nextUrl = parser.getNextPageUrl();
   const auto& prevUrl = parser.getPrevPageUrl();
   const bool feedTruncated = parser.truncated();
+
+  // render() iterates entries and reads statusMessage/errorMessage on the render task,
+  // and loop() holds no RenderLock (ActivityManager.cpp:77). Publish the whole new feed
+  // under the lock so render() never sees a half-replaced list.
+  RenderLock lock;
+  searchTemplate = parser.getSearchTemplate();
   entries = std::move(parser).getEntries();
 
   entries.reserve(entries.size() + (prevUrl.empty() ? 0 : 1) + (nextUrl.empty() ? 0 : 1));
@@ -307,9 +312,11 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   selectorIndex = 0;
   state = entries.empty() ? BrowserState::ERROR : BrowserState::BROWSING;
   if (entries.empty()) errorMessage = tr(STR_NO_ENTRIES);
+  lock.unlock();
   requestUpdate();
 }
 
+// Callers must hold a RenderLock: this frees every OpdsEntry string that render() draws.
 void OpdsBookBrowserActivity::releaseEntries() { std::vector<OpdsEntry>().swap(entries); }
 
 void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
@@ -318,10 +325,14 @@ void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
   currentPath = UrlUtils::buildUrl(feedUrl, entry.href);
 
-  state = BrowserState::LOADING;
-  statusMessage = tr(STR_LOADING);
-  releaseEntries();
-  selectorIndex = 0;
+  {
+    // NB: `entry` is a reference into `entries`, so it must not be touched after this block.
+    RenderLock lock;
+    state = BrowserState::LOADING;
+    statusMessage = tr(STR_LOADING);
+    releaseEntries();
+    selectorIndex = 0;
+  }
   requestUpdate(true);
   fetchFeed(currentPath);
 }
@@ -332,10 +343,13 @@ void OpdsBookBrowserActivity::navigateBack() {
   } else {
     currentPath = navigationHistory.back();
     navigationHistory.pop_back();
-    state = BrowserState::LOADING;
-    statusMessage = tr(STR_LOADING);
-    releaseEntries();
-    selectorIndex = 0;
+    {
+      RenderLock lock;  // see navigateToEntry()
+      state = BrowserState::LOADING;
+      statusMessage = tr(STR_LOADING);
+      releaseEntries();
+      selectorIndex = 0;
+    }
     requestUpdate();
     fetchFeed(currentPath);
   }
@@ -445,13 +459,16 @@ void OpdsBookBrowserActivity::performSearch(const std::string& query) {
   const size_t pos = url.find(placeholder);
   if (pos != std::string::npos) url.replace(pos, placeholder.length(), urlEncode(query));
 
-  navigationHistory.push_back(currentPath);  // <-- add this
-  currentPath = url;                         // <-- add this
+  navigationHistory.push_back(currentPath);
+  currentPath = url;
 
-  state = BrowserState::LOADING;
-  statusMessage = tr(STR_LOADING);
-  releaseEntries();
-  selectorIndex = 0;
+  {
+    RenderLock lock;  // see navigateToEntry()
+    state = BrowserState::LOADING;
+    statusMessage = tr(STR_LOADING);
+    releaseEntries();
+    selectorIndex = 0;
+  }
   requestUpdate(true);
   fetchFeed(url);
 }

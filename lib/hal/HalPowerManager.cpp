@@ -33,28 +33,35 @@ void HalPowerManager::setPowerSaving(bool enabled) {
     enabled = false;
   }
 
-  // Note: We don't use mutex here to avoid too much overhead,
-  // it's not very important if we read a slightly stale value for currentLockMode
+  // The read-decide-apply-publish sequence below must be atomic. It used to run
+  // unlocked: a task preempted between setCpuFrequencyMhz() and `isLowPower = true`
+  // left the flag disagreeing with the actual clock, so the render task's Lock would
+  // then fail its `isLowPower` guard, skip the restore, and run a whole e-ink refresh
+  // at LOW_POWER_FREQ. Taking modeMutex here cannot deadlock: Lock::Lock() releases it
+  // before calling us, and ~Lock() never calls us.
+  xSemaphoreTake(modeMutex, portMAX_DELAY);
+
   const LockMode mode = currentLockMode;
 
   if (mode == None && enabled && !isLowPower) {
     LOG_DBG("PWR", "Going to low-power mode");
-    if (!setCpuFrequencyMhz(LOW_POWER_FREQ)) {
+    if (setCpuFrequencyMhz(LOW_POWER_FREQ)) {
+      isLowPower = true;
+    } else {
       LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", LOW_POWER_FREQ);
-      return;
     }
-    isLowPower = true;
 
   } else if ((!enabled || mode != None) && isLowPower) {
     LOG_DBG("PWR", "Restoring normal CPU frequency");
-    if (!setCpuFrequencyMhz(normalFreq)) {
+    if (setCpuFrequencyMhz(normalFreq)) {
+      isLowPower = false;
+    } else {
       LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", normalFreq);
-      return;
     }
-    isLowPower = false;
   }
 
   // Otherwise, no change needed
+  xSemaphoreGive(modeMutex);
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
