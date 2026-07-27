@@ -594,6 +594,21 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // A tap on the text of a footnote or cross-reference link follows it -- the same jump the
+  // footnotes menu performs. Checked before the page-turn tap zones (which cover the whole
+  // screen) so a link wins on its own small box while every other tap still turns the page.
+  if (!atEndOfBook && pageLinkBoxCount > 0 && SETTINGS.touchReaderControls && mappedInput.hasTouch()) {
+    int touchX = 0;
+    int touchY = 0;
+    if (mappedInput.wasScreenTapped(touchX, touchY)) {
+      const int footnoteIndex = EpubReaderUtils::linkBoxAtPoint(pageLinkBoxes, pageLinkBoxCount, touchX, touchY);
+      if (footnoteIndex >= 0 && footnoteIndex < static_cast<int>(currentPageFootnotes.size())) {
+        navigateToHref(currentPageFootnotes[footnoteIndex].href, true);  // savePosition: Back returns here
+        return;
+      }
+    }
+  }
+
   auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
@@ -1393,8 +1408,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     }
     pageLoadRetryCount = 0;  // Reset the retry counter once a page loads cleanly
 
-    // Collect footnotes from the loaded page
+    // Collect footnotes from the loaded page, plus the screen boxes of their links so a tap can
+    // follow one. Derived from the page's underlined words while it is still in hand; pages
+    // without footnotes (most of them) skip the scan entirely.
     currentPageFootnotes = std::move(p->footnotes);
+    pageLinkBoxCount = EpubReaderUtils::collectLinkBoxes(*p, currentPageFootnotes, renderer, SETTINGS.getReaderFontId(),
+                                                         orientedMarginLeft, orientedMarginTop, pageLinkBoxes,
+                                                         Page::MAX_FOOTNOTES_PER_PAGE);
 
     const auto start = millis();
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);

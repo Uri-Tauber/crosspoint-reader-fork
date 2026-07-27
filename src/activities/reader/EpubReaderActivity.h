@@ -8,6 +8,7 @@
 #include "BookmarkEntry.h"
 #include "EndOfBookOptions.h"
 #include "EpubReaderMenuActivity.h"
+#include "EpubReaderUtils.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
 
@@ -68,6 +69,11 @@ class EpubReaderActivity final : public Activity {
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
+  // Screen boxes of the current page's links, rebuilt by every render() from the page's
+  // underlined words (see EpubReaderUtils::collectLinkBoxes) so a tap can follow one. Fixed
+  // array: at most one box per footnote entry, no per-page allocation.
+  EpubReaderUtils::LinkBox pageLinkBoxes[Page::MAX_FOOTNOTES_PER_PAGE] = {};
+  uint8_t pageLinkBoxCount = 0;
   struct SavedPosition {
     int spineIndex;
     int pageNumber;
