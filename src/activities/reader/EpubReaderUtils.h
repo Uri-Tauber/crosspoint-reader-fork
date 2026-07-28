@@ -59,15 +59,19 @@ constexpr size_t FOLD_CAPACITY = FOOTNOTE_NUMBER_LEN + 8;
 // where a prefix rule would let the run "12" claim the entry labelled "1".
 constexpr size_t PREFIX_MATCH_MIN = 4;
 
-// Appends the lowercased, alphanumeric-only fold of `text` to out[used..] (NUL-terminated) and
-// returns the new length. Comparing folds is what lets a link's laid-out words be matched to
-// the label the parser collected from the markup: layout may insert a hyphenation '-', split a
-// word into focus-reading tokens or drop a space, and the label had its whitespace and brackets
-// stripped when collected. Non-ASCII bytes are kept verbatim so non-Latin labels still compare.
+// Characters a fold drops -- only what a label and the words laid out from the same markup can
+// legitimately disagree on: layout splits a link's text on spaces (which the fold rejoins), may
+// insert a hyphenation '-' at a line break, and focus reading splits a word into tokens.
+inline bool foldDrops(const uint8_t c) { return std::isspace(c) != 0 || c == '-'; }
+
+// Appends the lowercased fold of `text` to out[used..] (NUL-terminated) and returns the new
+// length. Comparing folds is what lets a link's laid-out words be matched to the label the
+// parser collected from the markup. Non-ASCII bytes are kept verbatim so non-Latin labels (and
+// dagger markers) still compare.
 inline size_t appendFold(const char* text, char* out, const size_t outSize, size_t used) {
   for (const auto* p = reinterpret_cast<const uint8_t*>(text); *p != 0 && used + 1 < outSize; p++) {
     if (*p < 0x80) {
-      if (std::isalnum(*p) == 0) continue;
+      if (foldDrops(*p)) continue;
       out[used++] = static_cast<char>(std::tolower(*p));
     } else {
       out[used++] = static_cast<char>(*p);

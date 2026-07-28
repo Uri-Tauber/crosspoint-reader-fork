@@ -90,11 +90,17 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 30
+### Version 34
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Version 34 is structurally identical to version 33; only the text stored in a
+per-page footnote entry's `number` field changed. The label is now the link text
+verbatim (previously square brackets were stripped, so `[1]` was stored as `1`),
+which is what lets the reader pair a tapped word run on the page with its
+footnote entry. A v33 label would silently fail to match, hence the bump.
 
 Version 30 is binary-identical to version 29. The version was bumped because
 Arabic contextual shaping changed text measurement (`getTextAdvanceX` now

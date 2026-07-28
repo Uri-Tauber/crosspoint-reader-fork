@@ -1105,23 +1105,20 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     return;
   }
 
-  // Collect footnote link display text (for the number label)
-  // Skip whitespace and brackets to normalize noterefs like "[1]" → "1"
+  // Collect footnote link display text (for the number label).
   if (self->insideFootnoteLink) {
     int start = 0;
     int end = len - 1;
 
     // Example input and output texts:
-    // "     [  12  ]   " => "12"
+    // "     [  12  ]   " => "[  12  ]"
     // "   turn to 256  " => "turn to 256"
 
-    // Ignore leading whitespaces and left square brackets
-    while (start < len && (isWhitespace(s[start]) || (s[start] == '['))) {
+    while (start < len && isWhitespace(s[start])) {
       ++start;
     }
 
-    // Ignore trailing whitespaces and right square brackets
-    while (end >= start && (isWhitespace(s[end]) || (s[end] == ']'))) {
+    while (end >= start && isWhitespace(s[end])) {
       --end;
     }
 

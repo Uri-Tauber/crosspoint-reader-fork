@@ -21,7 +21,11 @@ namespace {
 //      (lazy extraction: images are header-probed at build time and extracted on
 //      first render).
 // v33: Support <ruby> and <rt> tags. Skip <rp> tags
-constexpr uint8_t SECTION_FILE_VERSION = 33;
+// v34: Per-page footnote labels keep the link text verbatim (square brackets are no longer
+//      stripped when collected), so a laid-out link's words can be matched back to its entry
+//      for tap-to-follow. Layout is byte-identical to v33; only the stored label text differs,
+//      and a v33 label would silently fail to match.
+constexpr uint8_t SECTION_FILE_VERSION = 34;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
