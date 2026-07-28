@@ -406,10 +406,6 @@ void EpubReaderActivity::loop() {
         LOG_ERR("ERS", "Background section build failed");
         section.reset();
         requestUpdate();
-      } else if (section->isBuildComplete() && applyDeferredReposition()) {
-        // The chapter re-paginated since the saved progress (settings changed): we now know the
-        // real page count, so re-render at the remapped page. No-op for an unchanged resume.
-        requestUpdate();
       }
     }
   }
@@ -820,6 +816,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                                  cachedSpineIndex = currentSpineIndex;
                                  cachedChapterTotalPageCount = section->pageCount;
                                  nextPageNumber = section->currentPage;
+                                 // A real settings change: force the resume remap even if a cache for
+                                 // the new settings already exists on SD (see repositionAfterSettingsChange).
+                                 repositionAfterSettingsChange = true;
                                }
                                section.reset();
                              });
@@ -1129,11 +1128,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // out the rest -- it re-parses from the top in the background (HTML already cached,
     // pages are deterministic) and finalizes, so the partial machinery retires itself.
     const bool cacheLoaded = section->loadSectionFile(renderSpec);
-    if (cacheLoaded) {
+    if (cacheLoaded && !repositionAfterSettingsChange) {
       // Matching render params means identical pagination, so the saved page number is valid
       // as-is: consume any pending settings-change reposition. Without this, a chapter total
       // saved while the section was still building (i.e. a watermark, not the real count)
       // would remap the resume page against the finalized count and teleport the reader.
+      // A genuine settings change (repositionAfterSettingsChange) is exempt: the cache that
+      // loaded here belongs to the NEW settings, so the old saved page still needs remapping
+      // against the new pagination -- estimatedTotalPages() is the exact count in that case.
       cachedChapterTotalPageCount = 0;
     }
     const bool cacheComplete = cacheLoaded && !section->isPartial();
@@ -1144,18 +1146,15 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         LOG_DBG("ERS", "Cache not found, building...");
       }
 
-      // Jumps that need the final pagination or the anchor map -- explicit page jumps,
-      // fragment anchors, percent jumps, and cross-setting progress repositioning -- can't
-      // resolve their landing page until the whole chapter is laid out, so they take the full
-      // (blocking) build with the indexing popup. Everything else -- plain forward reads, resume,
-      // and explicit page jumps -- only needs a specific page, so it builds incrementally to that
-      // page and finishes the rest in loop(). The settings-change reposition (cachedChapterTotal*)
-      // is NOT a full-build trigger: it's deferred to applyDeferredReposition() once the real page
-      // count is known, so it never blocks the first page.
-      // Only a percent jump truly needs the whole chapter up front (percent -> page needs the final
-      // page count). Anchor jumps (TOC / chapter select / footnotes) resolve incrementally below --
-      // the anchor is recorded as its page is laid out, so a chapter-top anchor lands on page 0
-      // without indexing the whole chapter.
+      // Everything but a percent jump only needs a specific page, so it builds incrementally to that
+      // page and finishes the rest in loop(). Only a percent jump truly needs the whole chapter up
+      // front (percent -> page needs the final page count), so it alone takes the full (blocking)
+      // build with the indexing popup. Anchor jumps (TOC / chapter select / footnotes) resolve
+      // incrementally below -- the anchor is recorded as its page is laid out, so a chapter-top
+      // anchor lands on page 0 without indexing the whole chapter. The settings-change reposition
+      // (cachedChapterTotal*) is likewise NOT a full-build trigger: it remaps the resume page against
+      // estimatedTotalPages() before the build-to-page loops (see repositionResumeForSettingsChange),
+      // so it never blocks the first page.
       const bool needsFullBuild = pendingPercentJump;
       if (needsFullBuild) {
         GUI.drawPopup(renderer, tr(STR_INDEXING));
@@ -1277,6 +1276,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (section->currentPage < 0) {
         section->currentPage = 0;
       }
+      // Remap the resume page now, before the build-to-page loops below lay out up to it, so the
+      // first page shown already lands in the right place after a text-settings change (no visible
+      // jump). No-op for a plain resume (cachedChapterTotalPageCount == 0). Explicit page/anchor/
+      // percent jumps set their own target and never enter this branch, so they are never remapped.
+      repositionResumeForSettingsChange();
     }
 
     if (!pendingAnchor.empty()) {
@@ -1354,10 +1358,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       section->currentPage >= static_cast<int>(section->pageCount)) {
     section->currentPage = section->pageCount - 1;
   }
-
-  // Apply a deferred settings-change reposition now that the real page count is known (a no-op for
-  // a plain resume / unchanged pagination). If still building, this defers to loop() on completion.
-  applyDeferredReposition();
 
   renderer.clearScreen();
 
@@ -1449,28 +1449,34 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 }
 
-bool EpubReaderActivity::applyDeferredReposition() {
-  if (cachedChapterTotalPageCount == 0 || !section || section->isBuilding()) {
-    return false;
+void EpubReaderActivity::repositionResumeForSettingsChange() {
+  const int oldTotal = cachedChapterTotalPageCount;
+  cachedChapterTotalPageCount = 0;        // consumed on the first render; never remap the same resume twice
+  repositionAfterSettingsChange = false;  // one-shot: consumed alongside the total it guards
+  // oldTotal == 0 means a plain resume (matching cache zeroed it at load), so there is nothing to
+  // remap. cachedSpineIndex guards against a resume that navigated to a different chapter first.
+  if (oldTotal <= 0 || !section || currentSpineIndex != cachedSpineIndex) {
+    return;
   }
-  bool changed = false;
-  // Only remap when the chapter actually re-paginated (e.g. after a settings change). A plain
-  // resume has identical pagination, so section->pageCount == cachedChapterTotalPageCount and
-  // nothing moves.
-  if (currentSpineIndex == cachedSpineIndex && section->pageCount != cachedChapterTotalPageCount) {
-    const float progress = static_cast<float>(section->currentPage) / static_cast<float>(cachedChapterTotalPageCount);
-    int newPage = static_cast<int>(progress * static_cast<float>(section->pageCount));
-    if (newPage < 0) newPage = 0;
-    if (section->pageCount > 0 && newPage >= static_cast<int>(section->pageCount)) {
-      newPage = section->pageCount - 1;
-    }
-    if (newPage != section->currentPage) {
-      section->currentPage = newPage;
-      changed = true;
-    }
+  const int savedPage = section->currentPage;  // still the raw resume page (== nextPageNumber) here
+  // estimatedTotalPages() stands in for the exact new-settings count, which isn't known until the
+  // whole chapter is laid out. Forcing that full build on every settings change would reintroduce
+  // the blocking indexing freeze the incremental builder exists to avoid; the fractional position
+  // is what matters, and any small overshoot past the real end is clamped downstream once the build
+  // finalizes (see the !isBuilding clamp below the build-to-page loops).
+  const int newTotal = section->estimatedTotalPages();
+  if (savedPage <= 0 || newTotal <= 0) {
+    return;  // chapter start or no estimate: page 0 maps to page 0
   }
-  cachedChapterTotalPageCount = 0;  // consumed; don't read cached progress again
-  return changed;
+  // Clamp the fraction to [0,1]: the old total may have been an under-estimate saved mid-build, so
+  // a page read past it must map to the new chapter's end, not overshoot it (the last-page bug).
+  float progress = static_cast<float>(savedPage) / static_cast<float>(oldTotal);
+  if (progress > 1.0f) progress = 1.0f;
+  int newPage = static_cast<int>(progress * static_cast<float>(newTotal));
+  if (newPage < 0) newPage = 0;
+  if (newPage >= newTotal) newPage = newTotal - 1;
+  section->currentPage = newPage;
+  LOG_DBG("ERS", "Settings-change resume remap: page %d/%d -> %d/~%d", savedPage, oldTotal, newPage, newTotal);
 }
 
 bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {

@@ -26,6 +26,12 @@ class EpubReaderActivity final : public Activity {
   bool forcedRefreshPending = false;
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
+  // Set when text settings are changed from inside the reader (the in-reader TextSettings path),
+  // which drops the section and resumes via cachedChapterTotalPageCount. Distinguishes a genuine
+  // settings change from a plain same-settings resume: without it, a still-present cache for the new
+  // settings (a partial, or a size the reader visited before) would suppress the resume remap and
+  // land on the stale absolute page. Consumed by repositionResumeForSettingsChange().
+  bool repositionAfterSettingsChange = false;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   // Signals that the next render should reposition within the newly loaded section
@@ -159,10 +165,11 @@ class EpubReaderActivity final : public Activity {
   bool buildPopupPending = false;
   // Draw the indexing popup mid-build (parser image-probe callback and deadline backstop).
   void showBuildPopup();
-  // Remap the cached relative reading position once the section's real page count is known
-  // (used after a settings change re-paginates a chapter). Returns true if currentPage moved.
-  // No-op while the section is still building or when the pagination is unchanged (plain resume).
-  bool applyDeferredReposition();
+  // Remap a resume page saved under different text settings to the equivalent fractional
+  // position under the current pagination. Called on the first render (before the build-to-page
+  // loops) so the very first page shown already lands correctly. No-op for a plain resume with
+  // unchanged settings (cachedChapterTotalPageCount is 0). Consumes cachedChapterTotalPageCount.
+  void repositionResumeForSettingsChange();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
