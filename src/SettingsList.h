@@ -183,13 +183,10 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
 // ACTION-type entries and entries without a key are device-only.
 //
 // The static list is constructed exactly once (master's optimization, #1086 +
-// #1636) so the per-entry SettingInfo cost is paid once; every call then copies
-// it. When an SdCardFontRegistry is supplied AND has SD card fonts installed,
-// the font-family entry is replaced in that copy with a registry-aware version.
-// The font-size entry is always rebuilt, since its options are point sizes read
-// from the active family rather than a fixed enum.
-inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
-                                                const std::vector<DictionaryEntry>* dictionaries = nullptr) {
+// #1636) so the per-entry SettingInfo cost is paid once. getSettingsBaseList()
+// exposes it by const reference; getSettingsList() returns a mutated copy, and
+// forEachWebSetting() streams the effective entries without copying at all.
+inline const std::vector<SettingInfo>& getSettingsBaseList() {
   static const std::vector<SettingInfo> baseList = [] {
     // Enum settings are persisted as numeric values. Assign these labels by enum
     // value so a reordered menu or enum cannot silently swap their behavior.
@@ -417,8 +414,18 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     }
     return v;
   }();
+  return baseList;
+}
 
-  std::vector<SettingInfo> v = baseList;
+// Materialize a mutable, fully-resolved settings list: the base list plus touch-
+// based filtering, the two dynamic font entries, and any dictionary entries. This
+// copies the whole vector (~5 KB contiguous plus per-entry sub-allocations), so on
+// the heap-constrained web task prefer forEachWebSetting(), which streams the same
+// entries without the copy — a fragmented heap after a reading session can fail the
+// contiguous allocation this copy needs.
+inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
+                                                const std::vector<DictionaryEntry>* dictionaries = nullptr) {
+  std::vector<SettingInfo> v = getSettingsBaseList();
   if (!BoardConfig::hasTouch()) {
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const SettingInfo& s) { return s.nameId == StrId::STR_TOUCH_READER_CONTROLS; }),
@@ -453,4 +460,33 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     v.insert(it, buildDictionarySetting(*dictionaries));
   }
   return v;
+}
+
+// Stream the effective settings entries WITHOUT materializing getSettingsList()'s
+// by-value copy. Invokes fn(const SettingInfo&) for each entry that the web API
+// would emit — the base list with the same touch-based filtering and the same two
+// dynamic entries (font-family, font-size) swapped in place. The dynamic entries are
+// built on the stack and passed by reference one at a time, so at most a single
+// SettingInfo (not the whole ~5 KB vector) is alive beyond the static base list.
+//
+// This is the OOM-safe path for handlers running on the web task, whose heap is
+// fragmented after a reading/cache-rebuild session. Dictionary insertion is
+// intentionally omitted: the web API does not expose the dictionary setting.
+template <typename Fn>
+inline void forEachWebSetting(const SdCardFontRegistry* registry, Fn&& fn) {
+  const bool hasTouch = BoardConfig::hasTouch();
+  for (const SettingInfo& s : getSettingsBaseList()) {
+    if (!hasTouch && s.nameId == StrId::STR_TOUCH_READER_CONTROLS) continue;
+    if (hasTouch &&
+        (s.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || s.nameId == StrId::STR_SUNLIGHT_FADING_FIX)) {
+      continue;
+    }
+    if (s.nameId == StrId::STR_FONT_FAMILY && registry && registry->getFamilyCount() > 0) {
+      fn(buildFontFamilySetting(registry));
+    } else if (s.nameId == StrId::STR_FONT_SIZE) {
+      fn(buildFontSizeSetting(registry));
+    } else {
+      fn(s);
+    }
+  }
 }

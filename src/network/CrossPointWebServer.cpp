@@ -205,13 +205,25 @@ void CrossPointWebServer::begin() {
   udpActive = udp.begin(LOCAL_UDP_PORT);
   LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
 
-  // All request handlers run on the task that calls handleClient(). Register
-  // that task before any handler can call esp_task_wdt_reset().
-  const esp_err_t watchdogResult = esp_task_wdt_add(nullptr);
-  watchdogTaskRegistered = watchdogResult == ESP_OK;
-  if (!watchdogTaskRegistered) {
-    LOG_ERR("WEB", "Failed to register web server task with watchdog: %s", esp_err_to_name(watchdogResult));
-  }
+  // The task that calls handleClient() is deliberately NOT subscribed to the task
+  // watchdog, and must not be.
+  //
+  // Every response is written from inside handleClient() via NetworkClient::write(),
+  // which cannot be bounded from here: it retries around a 1 s select(), and on each
+  // partial send it RESETS its retry budget (NetworkClient.cpp:432). A client whose
+  // receive window stalls -- or a heap too depleted for lwIP to queue pbufs, which is
+  // exactly the state after a cache rebuild -- parks this task inside a single write()
+  // call past the 5 s TWDT timeout, with no point at which application code regains
+  // control to feed the watchdog.
+  //
+  // Subscribing therefore cannot be made safe by sprinkling esp_task_wdt_reset() calls
+  // between writes; it only converts a slow response into a panic reboot. The task
+  // blocks in select() rather than spinning, so it still yields, and the CPU0 idle-task
+  // watchdog (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0) still covers genuine CPU hogs.
+  //
+  // The resetTaskWatchdogIfSubscribed() calls in this file are guarded and become
+  // no-ops; they are kept so the code stays correct if these handlers are ever driven
+  // from a task that IS subscribed.
 
   running = true;
 
@@ -242,10 +254,6 @@ void CrossPointWebServer::abortWsUpload(const char* tag) {
 void CrossPointWebServer::stop() {
   if (!running || !server) {
     LOG_DBG("WEB", "stop() called but already stopped (running=%d, server=%p)", running, server.get());
-    if (watchdogTaskRegistered) {
-      esp_task_wdt_delete(nullptr);
-      watchdogTaskRegistered = false;
-    }
     return;
   }
 
@@ -285,11 +293,6 @@ void CrossPointWebServer::stop() {
   server.reset();
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
-
-  if (watchdogTaskRegistered) {
-    esp_task_wdt_delete(nullptr);
-    watchdogTaskRegistered = false;
-  }
 
   // Note: Static upload variables (uploadFileName, uploadPath, uploadError) are declared
   // later in the file and will be cleared when they go out of scope or on next upload
@@ -1164,22 +1167,20 @@ void CrossPointWebServer::handleSettingsPage() const {
 }
 
 void CrossPointWebServer::handleGetSettings() const {
-  // Pass the SD font registry so the fontFamily setting's enumStringValues
-  // includes SD-resident families — otherwise the web API only exposes the
-  // three built-in fonts.
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
-
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
   server->sendContent("[");
 
   char output[512];
-  constexpr size_t outputSize = sizeof(output);
   bool seenFirst = false;
   JsonDocument doc;
 
-  for (const auto& s : settings) {
-    if (!s.key) continue;  // Skip ACTION-only entries
+  // Stream each entry instead of copying the whole settings vector: getSettingsList()'s
+  // by-value copy needs ~5 KB contiguous, which a heap fragmented by a reading session
+  // cannot supply, and a failed allocation aborts (-fno-exceptions). Pass the SD font
+  // registry so the fontFamily entry lists SD-resident families.
+  forEachWebSetting(&sdFontSystem.registry(), [&](const SettingInfo& s) {
+    if (!s.key) return;  // Skip ACTION-only entries
 
     doc.clear();
     doc["key"] = s.key;
@@ -1233,13 +1234,13 @@ void CrossPointWebServer::handleGetSettings() const {
         break;
       }
       default:
-        continue;
+        return;
     }
 
-    const size_t written = serializeJson(doc, output, outputSize);
-    if (written >= outputSize) {
+    const size_t written = serializeJson(doc, output, sizeof(output));
+    if (written >= sizeof(output)) {
       LOG_DBG("WEB", "Skipping oversized setting JSON for: %s", s.key);
-      continue;
+      return;
     }
 
     if (seenFirst) {
@@ -1248,7 +1249,7 @@ void CrossPointWebServer::handleGetSettings() const {
       seenFirst = true;
     }
     server->sendContent(output);
-  }
+  });
 
   server->sendContent("]");
   server->sendContent("");
@@ -1269,12 +1270,13 @@ void CrossPointWebServer::handlePostSettings() {
     return;
   }
 
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
   int applied = 0;
 
-  for (const auto& s : settings) {
-    if (!s.key) continue;
-    if (!doc[s.key].is<JsonVariant>()) continue;
+  // Stream entries rather than copying the whole settings vector (see handleGetSettings):
+  // the web task's fragmented heap can fail that ~5 KB contiguous copy and abort.
+  forEachWebSetting(&sdFontSystem.registry(), [&](const SettingInfo& s) {
+    if (!s.key) return;
+    if (!doc[s.key].is<JsonVariant>()) return;
 
     switch (s.type) {
       case SettingType::TOGGLE: {
@@ -1324,7 +1326,7 @@ void CrossPointWebServer::handlePostSettings() {
       default:
         break;
     }
-  }
+  });
 
   SETTINGS.saveToFile();
 
