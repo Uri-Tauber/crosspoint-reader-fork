@@ -330,3 +330,50 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## `progress.bin`
+
+Stores the reader's resume position for a book (one file per book, at the cache
+root). Unlike `book.bin` / `section.bin`, `progress.bin` is **irreplaceable user
+state**, so a format change is *migrated, never discarded*: older records are still
+read and upgraded to the current version on the next save.
+
+Records are discriminated by **length**. Legacy records have no version field:
+
+- **4 bytes** — `{ u16 spineIndex; u16 page; }`
+- **6 bytes** — `{ u16 spineIndex; u16 page; u16 totalPages; }`
+
+Versioned records lead with a `version` byte (currently `1`). A legacy record is
+never 27 bytes, so length alone separates the two; the version byte then carries
+format evolution past v1.
+
+### Version 1 (27 bytes)
+
+Adds the paragraph anchor and the render spec so a resume can tell *same
+pagination* (use the exact page) from *re-paginated* (remap to the saved
+paragraph). `totalPages` is display-only (the "page X of Y" total shown before the
+section finishes loading). `paragraphIndex == 0xFFFF` means "no anchor recorded".
+See `src/activities/reader/EpubReaderUtils.h`.
+
+```c++
+struct ProgressBinV1 {
+    u8  version;          // == 1
+    u16 spineIndex;
+    u16 page;
+    u16 paragraphIndex;   // 0xFFFF = unknown
+    u16 totalPages;       // display-only
+    // ReaderRenderSpec, in the same field order Section serializes its header:
+    s32 fontId;
+    float lineCompression;
+    u8  extraParagraphSpacing;
+    u8  paragraphAlignment;
+    u16 viewportWidth;
+    u16 viewportHeight;
+    u8  hyphenationEnabled;
+    u8  embeddedStyle;
+    u8  imageRendering;
+    u8  focusReadingEnabled;
+};
+
+ProgressBinV1 progress @ 0x00;
+```

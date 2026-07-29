@@ -458,6 +458,20 @@ std::optional<uint16_t> Section::findAnchor(const std::string& anchor) const {
   return getPageForAnchor(anchor);
 }
 
+std::optional<uint16_t> Section::findPageForParagraph(const uint16_t pIndex) const {
+  if (build_) {
+    // build_->lut grows in page order with a non-decreasing paragraphIndex, so the first page that
+    // reaches pIndex is the landing page. Not reached yet -> nullopt (build more). The on-disk file
+    // was deleted on the spec-mismatch load, so it must not be consulted while this build runs.
+    for (uint16_t i = 0; i < build_->lut.size(); i++) {
+      if (build_->lut[i].paragraphIndex >= pIndex) return i;
+    }
+    return std::nullopt;
+  }
+  // No active build: a finalized (or partial) on-disk file carries the paragraph LUT.
+  return getPageForParagraphIndex(pIndex);
+}
+
 uint16_t Section::estimatedTotalPages() const {
   // Extrapolation from a suspended session's watermark trailer. A static snapshot, so no EMA
   // damping is needed. Also the best guess while a rebuild is running but hasn't laid out
@@ -849,6 +863,12 @@ std::optional<uint16_t> Section::getPageForParagraphIndex(const uint16_t pIndex)
 }
 
 std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) const {
+  if (build_) {
+    // While a build is live the LUT is in RAM, not on disk (uncommitted until finalize/suspend), so
+    // read it here -- else an anchor captured mid-build comes back wrongly "unknown". Past it -> none.
+    if (page < build_->lut.size()) return build_->lut[page].paragraphIndex;
+    return std::nullopt;
+  }
   HalFile f;
   if (!Storage.openFileForRead("SCT", filePath, f)) {
     return std::nullopt;

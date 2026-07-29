@@ -141,6 +141,14 @@ class Section {
   // Look up the page number for a synthetic paragraph index from XPath p[N].
   std::optional<uint16_t> getPageForParagraphIndex(uint16_t pIndex) const;
 
+  // Resolve the landing page for a saved paragraph index during a settings-change resume. Prefers
+  // the in-progress build's RAM LUT: a spec mismatch deletes the old on-disk file at load
+  // (loadSectionFile -> clearCache), so during the fresh rebuild only build_->lut reflects the new
+  // pagination. Falls back to the on-disk paragraph LUT once no build is active (finalized/partial).
+  // The paragraph LUT is non-decreasing across pages, so the first page whose start paragraph
+  // reaches pIndex is the landing page. nullopt while a build has not laid out that paragraph yet.
+  std::optional<uint16_t> findPageForParagraph(uint16_t pIndex) const;
+
   // Look up the page number for a running list-item index from the li LUT.
   std::optional<uint16_t> getPageForListItemIndex(uint16_t liIndex) const;
 

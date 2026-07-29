@@ -24,14 +24,25 @@ class EpubReaderActivity final : public Activity {
   // Image pages use a dedicated double-FAST refresh path, so retain a manual
   // refresh request until renderContents can issue its clean base pass.
   bool forcedRefreshPending = false;
-  int cachedSpineIndex = 0;
+  // Display-only cache of the chapter's total page count, loaded from progress.bin and used to show
+  // "page X of Y" / progress in the window before the section finishes loading (section ?
+  // estimatedTotalPages() : cachedChapterTotalPageCount). Not part of the resume-reposition decision.
   int cachedChapterTotalPageCount = 0;
-  // Set when text settings are changed from inside the reader (the in-reader TextSettings path),
-  // which drops the section and resumes via cachedChapterTotalPageCount. Distinguishes a genuine
-  // settings change from a plain same-settings resume: without it, a still-present cache for the new
-  // settings (a partial, or a size the reader visited before) would suppress the resume remap and
-  // land on the stale absolute page. Consumed by repositionResumeForSettingsChange().
-  bool repositionAfterSettingsChange = false;
+  // The render spec the current section was built with (stashed each render). Persisted with progress
+  // so a later load can compare it against the then-current spec, and read by captureResumeTarget() as
+  // the "old" spec when a re-pagination is triggered from inside the reader.
+  ReaderRenderSpec currentRenderSpec{};
+  // A pending settings-aware resume: preserve the reader's *content* position (paragraph anchor)
+  // across a re-pagination instead of a stale absolute page. Set from persisted progress on open and
+  // by captureResumeTarget() on an in-reader font/orientation/auto-turn change; consumed by
+  // resolveResumeTarget() on the next render. If savedSpec matches the current spec the page is exact
+  // (fast path); otherwise the page is re-derived from paragraphIndex.
+  struct ResumeTarget {
+    int spineIndex = 0;
+    uint16_t paragraphIndex = 0;
+    ReaderRenderSpec savedSpec{};
+  };
+  std::optional<ResumeTarget> resumeTarget;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   // Signals that the next render should reposition within the newly loaded section
@@ -165,12 +176,21 @@ class EpubReaderActivity final : public Activity {
   bool buildPopupPending = false;
   // Draw the indexing popup mid-build (parser image-probe callback and deadline backstop).
   void showBuildPopup();
-  // Remap a resume page saved under different text settings to the equivalent fractional
-  // position under the current pagination. Called on the first render (before the build-to-page
-  // loops) so the very first page shown already lands correctly. No-op for a plain resume with
-  // unchanged settings (cachedChapterTotalPageCount is 0). Consumes cachedChapterTotalPageCount.
-  void repositionResumeForSettingsChange();
-  bool saveProgress(int spineIndex, int currentPage, int pageCount);
+  // Capture the reader's content position (paragraph anchor + the spec the current section was built
+  // with) before dropping the section for a re-pagination. Called by every in-reader reflow site
+  // (text settings, orientation, auto-page-turn) so none can forget the settings-change signal.
+  void captureResumeTarget();
+  // Apply a pending ResumeTarget on the first render after a section (re)loads. Fast path: the saved
+  // spec matches the current spec, so the exact page is kept. Otherwise re-derive the page from the
+  // saved paragraph. One-shot: consumed on a successful landing so forward reading is never yanked
+  // back.
+  void resolveResumeTarget(const ReaderRenderSpec& currentSpec);
+  // Paragraph the current page starts with -- the single source of truth for every progress/anchor
+  // writer (saves, KOReader sync, getCurrentPosition) so a resume lands on the same content whoever
+  // wrote it. nullopt when there is no section or the page is out of range.
+  std::optional<uint16_t> currentPageParagraphAnchor() const;
+  bool saveProgress(int spineIndex, int currentPage, int pageCount,
+                    std::optional<uint16_t> paragraphIndex = std::nullopt);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);

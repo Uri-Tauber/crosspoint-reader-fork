@@ -21,4 +21,10 @@ struct ReaderRenderSpec {
   bool embeddedStyle = true;
   uint8_t imageRendering = 0;
   bool focusReadingEnabled = false;
+
+  // Field-for-field equality: the resume fast path compares the spec a saved position was taken
+  // under against the current spec to decide "same pagination (use the exact page)" vs. "re-paginated
+  // (remap by paragraph anchor)". lineCompression is derived deterministically from settings, so the
+  // same settings reproduce bit-identical floats and == is exact.
+  bool operator==(const ReaderRenderSpec&) const = default;
 };

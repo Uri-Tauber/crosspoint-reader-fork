@@ -173,23 +173,40 @@ void EpubReaderActivity::onEnter() {
 
   HalFile f;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[6];
-    int dataSize = f.read(data, 6);
+    uint8_t data[EpubReaderUtils::PROGRESS_RECORD_SIZE];
+    int dataSize = f.read(data, sizeof(data));
+    // UINT16_MAX in the page field is an in-memory "open previous chapter on its last page"
+    // navigation sentinel; it must never be treated as persisted resume state after sleep or reopen.
     if (dataSize == 4 || dataSize == 6) {
+      // Legacy unversioned record: {spine, page[, total]}. No spec/paragraph anchor, so resume as a
+      // plain same-settings resume (resumeTarget stays empty); it upgrades to the versioned format on
+      // the next save.
       currentSpineIndex = data[0] + (data[1] << 8);
       nextPageNumber = data[2] + (data[3] << 8);
       if (nextPageNumber == UINT16_MAX) {
-        // UINT16_MAX is an in-memory navigation sentinel for "open previous
-        // chapter on its last page". It should never be treated as persisted
-        // resume state after sleep or reopen.
         LOG_DBG("ERS", "Ignoring stale last-page sentinel from progress cache");
         nextPageNumber = 0;
       }
-      cachedSpineIndex = currentSpineIndex;
-      LOG_DBG("ERS", "Loaded cache: %d, %d", currentSpineIndex, nextPageNumber);
-    }
-    if (dataSize == 6) {
-      cachedChapterTotalPageCount = data[4] + (data[5] << 8);
+      if (dataSize == 6) {
+        cachedChapterTotalPageCount = data[4] + (data[5] << 8);
+      }
+      LOG_DBG("ERS", "Loaded legacy progress: %d, %d", currentSpineIndex, nextPageNumber);
+    } else if (dataSize >= static_cast<int>(EpubReaderUtils::PROGRESS_RECORD_SIZE) &&
+               data[0] == EpubReaderUtils::PROGRESS_VERSION) {
+      EpubReaderUtils::ProgressRecord rec;
+      EpubReaderUtils::decodeProgress(data, rec);
+      currentSpineIndex = rec.spineIndex;
+      nextPageNumber = rec.page;
+      if (nextPageNumber == UINT16_MAX) {
+        LOG_DBG("ERS", "Ignoring stale last-page sentinel from progress cache");
+        nextPageNumber = 0;
+      }
+      cachedChapterTotalPageCount = rec.totalPages;
+      // Resume by paragraph anchor iff the pagination changed since this position was saved: the
+      // first render compares rec.spec against the then-current spec (same -> exact page).
+      resumeTarget = ResumeTarget{static_cast<int>(rec.spineIndex), rec.paragraphIndex, rec.spec};
+      LOG_DBG("ERS", "Loaded progress: spine=%d page=%d para=%u", currentSpineIndex, nextPageNumber,
+              rec.paragraphIndex);
     }
   }
   // We may want a better condition to detect if we are opening for the first time.
@@ -812,14 +829,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                                // layout: preserve position and force a re-layout, mirroring
                                // applyOrientation()'s reflow.
                                RenderLock lock(*this);
-                               if (section) {
-                                 cachedSpineIndex = currentSpineIndex;
-                                 cachedChapterTotalPageCount = section->pageCount;
-                                 nextPageNumber = section->currentPage;
-                                 // A real settings change: force the resume remap even if a cache for
-                                 // the new settings already exists on SD (see repositionAfterSettingsChange).
-                                 repositionAfterSettingsChange = true;
-                               }
+                               captureResumeTarget();
                                section.reset();
                              });
       break;
@@ -868,10 +878,11 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           uint16_t backupSpine = currentSpineIndex;
           uint16_t backupPage = section->currentPage;
           uint16_t backupPageCount = section->pageCount;
+          const auto backupParagraph = currentPageParagraphAnchor();
           section.reset();
           epub->clearCache();
           epub->setupCacheDir();
-          if (!saveProgress(backupSpine, backupPage, backupPageCount)) {
+          if (!saveProgress(backupSpine, backupPage, backupPageCount, backupParagraph)) {
             LOG_ERR("ERS", "Failed to save progress before cache clear");
           }
         }
@@ -909,14 +920,7 @@ bool EpubReaderActivity::launchKOReaderSync() {
 
   const int currentPage = section ? section->currentPage : nextPageNumber;
   const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
-  std::optional<uint16_t> paragraphIndex;
-  if (section && currentPage >= 0 && currentPage < section->pageCount) {
-    const uint16_t paragraphPage =
-        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
-    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
-      paragraphIndex = *pIdx;
-    }
-  }
+  const std::optional<uint16_t> paragraphIndex = currentPageParagraphAnchor();
 
   // Pre-compute local KO position and chapter name while Epub is still in RAM.
   CrossPointPosition localPos = getCurrentPosition();
@@ -965,11 +969,7 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
   // Preserve current reading position so we can restore after reflow.
   {
     RenderLock lock(*this);
-    if (section) {
-      cachedSpineIndex = currentSpineIndex;
-      cachedChapterTotalPageCount = section->pageCount;
-      nextPageNumber = section->currentPage;
-    }
+    captureResumeTarget();
 
     // Persist the selection so the reader keeps the new orientation on next launch.
     SETTINGS.orientation = orientation;
@@ -999,11 +999,7 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
   if (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight()) {
     // Preserve current reading position so we can restore after reflow.
     RenderLock lock(*this);
-    if (section) {
-      cachedSpineIndex = currentSpineIndex;
-      cachedChapterTotalPageCount = section->pageCount;
-      nextPageNumber = section->currentPage;
-    }
+    captureResumeTarget();
     section.reset();
   }
 }
@@ -1114,6 +1110,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   buildViewportHeight = viewportHeight;
 
   const ReaderRenderSpec renderSpec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight);
+  // Remember the spec this render (and any section built in it) uses: persisted with progress for the
+  // resume fast-path comparison, and read by captureResumeTarget() as the pre-change "old" spec.
+  currentRenderSpec = renderSpec;
 
   if (!section) {
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
@@ -1128,16 +1127,18 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // out the rest -- it re-parses from the top in the background (HTML already cached,
     // pages are deterministic) and finalizes, so the partial machinery retires itself.
     const bool cacheLoaded = section->loadSectionFile(renderSpec);
-    if (cacheLoaded && !repositionAfterSettingsChange) {
-      // Matching render params means identical pagination, so the saved page number is valid
-      // as-is: consume any pending settings-change reposition. Without this, a chapter total
-      // saved while the section was still building (i.e. a watermark, not the real count)
-      // would remap the resume page against the finalized count and teleport the reader.
-      // A genuine settings change (repositionAfterSettingsChange) is exempt: the cache that
-      // loaded here belongs to the NEW settings, so the old saved page still needs remapping
-      // against the new pagination -- estimatedTotalPages() is the exact count in that case.
-      cachedChapterTotalPageCount = 0;
-    }
+    // A pending resume whose saved spec differs from the current one means the chapter re-paginated,
+    // so the saved absolute page is stale: land by paragraph anchor instead. The spec mismatch just
+    // deleted the old on-disk file inside loadSectionFile(), so a paragraph remap always faces a
+    // fresh build (never a partial/finalized match) and the build below runs to the target paragraph
+    // rather than to the stale old page number. A matching spec keeps the exact page (fast path).
+    // An unusable anchor (see isUsableResumeAnchor) skips the remap -- otherwise findPageForParagraph()
+    // never resolves and the loop below builds the whole chapter synchronously; resolveResumeTarget()
+    // clamps the old page instead.
+    const bool paragraphRemap = resumeTarget && resumeTarget->spineIndex == currentSpineIndex &&
+                                resumeTarget->savedSpec != renderSpec && !pendingPageJump.has_value() &&
+                                pendingAnchor.empty() &&
+                                EpubReaderUtils::isUsableResumeAnchor(resumeTarget->paragraphIndex);
     const bool cacheComplete = cacheLoaded && !section->isPartial();
     if (!cacheComplete) {
       if (section->isPartial()) {
@@ -1151,10 +1152,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // front (percent -> page needs the final page count), so it alone takes the full (blocking)
       // build with the indexing popup. Anchor jumps (TOC / chapter select / footnotes) resolve
       // incrementally below -- the anchor is recorded as its page is laid out, so a chapter-top
-      // anchor lands on page 0 without indexing the whole chapter. The settings-change reposition
-      // (cachedChapterTotal*) is likewise NOT a full-build trigger: it remaps the resume page against
-      // estimatedTotalPages() before the build-to-page loops (see repositionResumeForSettingsChange),
-      // so it never blocks the first page.
+      // anchor lands on page 0 without indexing the whole chapter. A settings-change resume
+      // (paragraphRemap) resolves the same way: the build runs until the saved paragraph is laid out,
+      // so it never blocks longer than reaching that paragraph.
       const bool needsFullBuild = pendingPercentJump;
       if (needsFullBuild) {
         GUI.drawPopup(renderer, tr(STR_INDEXING));
@@ -1185,13 +1185,23 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         // build in a blink and stay popup-free.
         const int target = pendingPageJump.has_value() ? *pendingPageJump : (nextPageNumber < 0 ? 0 : nextPageNumber);
         const bool anchorJump = !pendingAnchor.empty();
+        // Anchor jumps and settings-change resumes both build to a *content position* rather than a
+        // page number. resolveContentPage() returns the landing page once it is laid out (nullopt =
+        // build more), so it drives both the popup gating and the build-to-target loop below.
+        const bool contentJump = anchorJump || paragraphRemap;
+        const auto resolveContentPage = [&]() -> std::optional<uint16_t> {
+          if (anchorJump) return section->findAnchor(pendingAnchor);
+          if (paragraphRemap) return section->findPageForParagraph(resumeTarget->paragraphIndex);
+          return std::nullopt;
+        };
 
         // Landing well inside a partial: the page (or anchor, via the on-disk map) is already
         // servable, so don't restart the extension build now -- it re-lays out the WHOLE chapter
         // from page 0 (minutes of background CPU + SD writes on a giant spine), pure waste when
         // the reader never nears the watermark this session. loop() starts it lazily once the
-        // reader is within PARTIAL_REBUILD_START_MARGIN pages of the watermark.
-        if (section->isPartial() &&
+        // reader is within PARTIAL_REBUILD_START_MARGIN pages of the watermark. A paragraph remap
+        // always faces a fresh (non-partial) build, so it never reaches this deferral.
+        if (section->isPartial() && !paragraphRemap &&
             (anchorJump ? section->getPageForAnchor(pendingAnchor).has_value()
                         : target + PARTIAL_REBUILD_START_MARGIN < static_cast<int>(section->pageCount))) {
           LOG_DBG("ERS", "Partial covers target %d of %d; deferring extension build", target, section->pageCount);
@@ -1205,13 +1215,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           // A partial cache that already covers the target page shows it instantly: never popup.
           const bool willInflate = !section->hasHtmlCache();
           bool showPopup;
-          if (anchorJump) {
-            // An anchor jump's cost is bounded by the anchor's page, not `target`. An anchor already
-            // in the on-disk map (partial or finalized cache) lands instantly: no popup. Otherwise it
-            // lies beyond the indexed watermark and the build may lay out the whole spine to find it,
-            // so gate on spine size alone -- laying out a big spine takes seconds even with cached
-            // HTML. Ordinary chapter-top TOC jumps resolve on page 0 and stay popup-free.
-            showPopup = !section->findAnchor(pendingAnchor).has_value() && spineBytes > BUILD_POPUP_BYTE_THRESHOLD;
+          if (contentJump) {
+            // A content jump's (anchor or paragraph-remap) cost is bounded by its landing page, not
+            // `target`. Already resolvable (anchor in the on-disk map) lands instantly: no popup.
+            // Otherwise it may lay out much of the spine to reach it, so gate on spine size alone --
+            // laying out a big spine takes seconds even with cached HTML. Chapter-top anchors resolve
+            // on page 0 and stay popup-free; a paragraph remap always builds fresh so it gates on size.
+            showPopup = !resolveContentPage().has_value() && spineBytes > BUILD_POPUP_BYTE_THRESHOLD;
           } else {
             const bool targetAvailable = target < static_cast<int>(section->pageCount);
             showPopup = !targetAvailable && ((spineBytes > BUILD_POPUP_BYTE_THRESHOLD && willInflate) ||
@@ -1245,10 +1255,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
             return;
           }
           while (!section->isBuildComplete() &&
-                 (anchorJump ? !section->findAnchor(pendingAnchor) : static_cast<int>(section->pageCount) <= target)) {
-            // Anchor jump: build until the anchor's page is laid out (usually page 0), checking a
-            // partial's on-disk anchor map too so an already-indexed anchor resolves immediately.
-            // Otherwise: build until the target page exists. loop() builds the rest behind it.
+                 (contentJump ? !resolveContentPage() : static_cast<int>(section->pageCount) <= target)) {
+            // Content jump (anchor or paragraph remap): build until its landing page is laid out --
+            // an anchor's page (usually page 0, checking a partial's on-disk map too), or the page
+            // holding the saved paragraph. Otherwise: build until the target page exists. loop()
+            // builds the rest behind it.
             if (buildPopupPending && millis() - buildStartMs >= BUILD_POPUP_DEADLINE_MS) {
               // The predictive gates guessed fast but the build blew the silent budget.
               showBuildPopup();
@@ -1271,16 +1282,18 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     if (pendingPageJump.has_value()) {
       section->currentPage = *pendingPageJump;
       pendingPageJump.reset();
+      // An explicit page jump supersedes any pending settings-change resume: the reader chose this
+      // page, so a stale ResumeTarget must not fire on a later render.
+      resumeTarget.reset();
     } else {
       section->currentPage = nextPageNumber;
       if (section->currentPage < 0) {
         section->currentPage = 0;
       }
-      // Remap the resume page now, before the build-to-page loops below lay out up to it, so the
-      // first page shown already lands in the right place after a text-settings change (no visible
-      // jump). No-op for a plain resume (cachedChapterTotalPageCount == 0). Explicit page/anchor/
-      // percent jumps set their own target and never enter this branch, so they are never remapped.
-      repositionResumeForSettingsChange();
+      // Land the resume now, before the render below reads the page. Fast path keeps this exact page
+      // (spec unchanged); a re-pagination re-derives it from the saved paragraph. The build-to-target
+      // loop above already laid out the paragraph's page for a remap, so this resolves without waiting.
+      resolveResumeTarget(renderSpec);
     }
 
     if (!pendingAnchor.empty()) {
@@ -1426,7 +1439,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // Every real page turn changes currentPage, so progress durability is unaffected.
   if (currentSpineIndex != lastSavedSpineIndex || section->currentPage != lastSavedPage ||
       section->pageCount != lastSavedPageCount) {
-    if (saveProgress(currentSpineIndex, section->currentPage, section->estimatedTotalPages())) {
+    // Persist the paragraph the current page starts with so a later resume under changed settings can
+    // remap by content position rather than the stale absolute page.
+    const auto paragraph = currentPageParagraphAnchor();
+    if (saveProgress(currentSpineIndex, section->currentPage, section->estimatedTotalPages(), paragraph)) {
       lastSavedSpineIndex = currentSpineIndex;
       lastSavedPage = section->currentPage;
       lastSavedPageCount = section->estimatedTotalPages();
@@ -1449,38 +1465,67 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 }
 
-void EpubReaderActivity::repositionResumeForSettingsChange() {
-  const int oldTotal = cachedChapterTotalPageCount;
-  cachedChapterTotalPageCount = 0;        // consumed on the first render; never remap the same resume twice
-  repositionAfterSettingsChange = false;  // one-shot: consumed alongside the total it guards
-  // oldTotal == 0 means a plain resume (matching cache zeroed it at load), so there is nothing to
-  // remap. cachedSpineIndex guards against a resume that navigated to a different chapter first.
-  if (oldTotal <= 0 || !section || currentSpineIndex != cachedSpineIndex) {
-    return;
-  }
-  const int savedPage = section->currentPage;  // still the raw resume page (== nextPageNumber) here
-  // estimatedTotalPages() stands in for the exact new-settings count, which isn't known until the
-  // whole chapter is laid out. Forcing that full build on every settings change would reintroduce
-  // the blocking indexing freeze the incremental builder exists to avoid; the fractional position
-  // is what matters, and any small overshoot past the real end is clamped downstream once the build
-  // finalizes (see the !isBuilding clamp below the build-to-page loops).
-  const int newTotal = section->estimatedTotalPages();
-  if (savedPage <= 0 || newTotal <= 0) {
-    return;  // chapter start or no estimate: page 0 maps to page 0
-  }
-  // Clamp the fraction to [0,1]: the old total may have been an under-estimate saved mid-build, so
-  // a page read past it must map to the new chapter's end, not overshoot it (the last-page bug).
-  float progress = static_cast<float>(savedPage) / static_cast<float>(oldTotal);
-  if (progress > 1.0f) progress = 1.0f;
-  int newPage = static_cast<int>(progress * static_cast<float>(newTotal));
-  if (newPage < 0) newPage = 0;
-  if (newPage >= newTotal) newPage = newTotal - 1;
-  section->currentPage = newPage;
-  LOG_DBG("ERS", "Settings-change resume remap: page %d/%d -> %d/~%d", savedPage, oldTotal, newPage, newTotal);
+std::optional<uint16_t> EpubReaderActivity::currentPageParagraphAnchor() const {
+  if (!section) return std::nullopt;
+  const int page = section->currentPage;
+  if (page < 0 || page >= static_cast<int>(section->pageCount)) return std::nullopt;
+  // The LUT records each page's LAST paragraph, so the paragraph a page STARTS with is the previous
+  // page's entry; page 0 has no predecessor, so use its own entry (the chapter's first paragraph).
+  const uint16_t anchorPage = page > 0 ? static_cast<uint16_t>(page - 1) : 0;
+  return section->getParagraphIndexForPage(anchorPage);
 }
 
-bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
-  return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
+void EpubReaderActivity::captureResumeTarget() {
+  // Called by every in-reader reflow site (text settings, orientation, auto-page-turn) before the
+  // section is dropped, so none can forget the settings-change signal. Records the paragraph the
+  // current page starts with plus the spec the section was built with (currentRenderSpec is still the
+  // pre-change spec here -- it is only updated in render()). The next render sees a different spec and
+  // remaps to that paragraph under the new pagination.
+  if (!section) return;
+  nextPageNumber = section->currentPage;
+  const uint16_t para = currentPageParagraphAnchor().value_or(EpubReaderUtils::PROGRESS_PARAGRAPH_UNKNOWN);
+  resumeTarget = ResumeTarget{currentSpineIndex, para, currentRenderSpec};
+  // Keep the display total fresh for the pre-section-load window.
+  cachedChapterTotalPageCount = section->estimatedTotalPages();
+}
+
+void EpubReaderActivity::resolveResumeTarget(const ReaderRenderSpec& currentSpec) {
+  if (!resumeTarget) return;
+  const ResumeTarget rt = *resumeTarget;
+  // Consume it: once the reader has landed, paging forward must not be yanked back by a re-resolve.
+  // A build failure returns before this point, so the target survives to the next (identical) render.
+  resumeTarget.reset();
+  if (!section || rt.spineIndex != currentSpineIndex) {
+    return;  // navigated to a different chapter before the resume resolved
+  }
+  if (rt.savedSpec == currentSpec) {
+    return;  // same pagination: the exact page (already set from nextPageNumber) is valid
+  }
+  // Re-pagination: land on the page holding the saved paragraph. The build-to-target loop already
+  // laid it out, so findPageForParagraph resolves without further building.
+  if (EpubReaderUtils::isUsableResumeAnchor(rt.paragraphIndex)) {
+    if (const auto page = section->findPageForParagraph(rt.paragraphIndex)) {
+      section->currentPage = *page;
+      LOG_DBG("ERS", "Settings-change resume: paragraph %u -> page %d", rt.paragraphIndex, *page);
+      return;
+    }
+  }
+  // No usable anchor (unknown, a paragraph-0/div-only chapter, or the chapter no longer contains it):
+  // clamp the old absolute page into the new range so the reader never overshoots the chapter end.
+  const int newTotal = section->estimatedTotalPages();
+  if (newTotal > 0 && section->currentPage >= newTotal) {
+    section->currentPage = newTotal - 1;
+  }
+  if (section->currentPage < 0) {
+    section->currentPage = 0;
+  }
+}
+
+bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount,
+                                      std::optional<uint16_t> paragraphIndex) {
+  return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount,
+                                       paragraphIndex.value_or(EpubReaderUtils::PROGRESS_PARAGRAPH_UNKNOWN),
+                                       currentRenderSpec);
 }
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
@@ -1966,14 +2011,7 @@ ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
 CrossPointPosition EpubReaderActivity::getCurrentPosition() const {
   const int currentPage = section ? section->currentPage : nextPageNumber;
   const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
-  std::optional<uint16_t> paragraphIndex;
-  if (section && currentPage >= 0 && currentPage < section->pageCount) {
-    const uint16_t paragraphPage =
-        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
-    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
-      paragraphIndex = *pIdx;
-    }
-  }
+  const std::optional<uint16_t> paragraphIndex = currentPageParagraphAnchor();
 
   CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
   if (paragraphIndex.has_value()) {
