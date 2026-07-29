@@ -863,12 +863,13 @@ std::optional<uint16_t> Section::getPageForParagraphIndex(const uint16_t pIndex)
 }
 
 std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) const {
-  if (build_) {
-    // While a build is live the LUT is in RAM, not on disk (uncommitted until finalize/suspend), so
-    // read it here -- else an anchor captured mid-build comes back wrongly "unknown". Past it -> none.
-    if (page < build_->lut.size()) return build_->lut[page].paragraphIndex;
-    return std::nullopt;
+  // While a build is live the LUT is in RAM, not on disk (uncommitted until finalize/suspend), so read
+  // it here -- else an anchor captured mid-build comes back wrongly "unknown".
+  if (build_ && page < build_->lut.size()) {
+    return build_->lut[page].paragraphIndex;
   }
+  // Beyond the live build (or no build): fall through to the committed file, like loadPage() -- a
+  // finalized section, or a previous session's partial whose pages the rebuild hasn't re-reached.
   HalFile f;
   if (!Storage.openFileForRead("SCT", filePath, f)) {
     return std::nullopt;
