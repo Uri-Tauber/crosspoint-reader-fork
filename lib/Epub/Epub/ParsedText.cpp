@@ -229,6 +229,16 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
 }
 
+// Returns true if a token ends with a visible hyphen or dash. Such a token is a legitimate
+// line-break opportunity even when the next segment was glued to it in the source text.
+// Soft hyphens (U+00AD) are deliberately excluded: they render as nothing unless a hyphenation
+// break converts one into a real '-', so breaking after a bare one would leave no visible hyphen.
+bool endsWithBreakableHyphen(const std::string& token) {
+  if (token.empty()) return false;
+  const uint32_t cp = lastCodepoint(token);
+  return cp == '-' || cp == 0x2013 || cp == 0x2014;
+}
+
 // Checks if a UTF-8 codepoint should be counted as part of a word for Focus Reading
 bool isWordCharacter(uint32_t cp) {
   // ASCII range (Catches 95%+ of characters immediately)
@@ -532,9 +542,14 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
 
       // Only the very first segment inherits the original attachToPrevious flag.
-      // Every subsequent segment MUST attach=true so it glues seamlessly to the prefix.
-      processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : true,
-                     isFirstSegment ? effectiveNoSpaceBefore : false);
+      // Every subsequent segment glues seamlessly to the prefix (attach=true) — except after a
+      // visible hyphen or dash, which is a real break opportunity that non-Focus-Reading mode
+      // gets for free (there the compound stays one token and Hyphenator::breakOffsets finds it).
+      // Same move as the CJK/Korean handling above: continues=false makes the boundary breakable,
+      // noSpaceBefore=true keeps the gap at zero so nothing shifts when it is not broken.
+      const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
+      processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : !breakAfterPrev,
+                     isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
 
       // Setup for the next segment
       segmentStart = currentCpStart;
@@ -546,8 +561,9 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // Process the final remaining segment
   size_t segmentLen = end - segmentStart;
   std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
-  processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : true,
-                 isFirstSegment ? effectiveNoSpaceBefore : false);
+  const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
+  processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : !breakAfterPrev,
+                 isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
   if (wordStartsRtl) {
     hasRtlWord = true;
   }
@@ -1065,8 +1081,23 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   const std::string& word = words[wordIndex];
   const auto style = wordStyles[wordIndex];
 
+  // Focus Reading splits each word into a bold-prefix token plus a regular-suffix token
+  // (see addWord()). Hyphenating the suffix in isolation hands the pattern engine a fragment
+  // ("ainly") instead of the real word ("certainly"), so it finds poor break points or none at
+  // all — the cause of #2115. Rebuild the original word for breakpoint discovery only, then map
+  // the chosen offset back into the suffix token, which is the only part still splittable.
+  size_t focusPrefixBytes = 0;
+  std::string mergedWord;
+  if (focusReadingEnabled && wordIsFocusSuffix[wordIndex] && wordIndex > 0 && !wordIsFocusSuffix[wordIndex - 1]) {
+    focusPrefixBytes = words[wordIndex - 1].size();
+    mergedWord.reserve(focusPrefixBytes + word.size());
+    mergedWord.append(words[wordIndex - 1]);
+    mergedWord.append(word);
+  }
+  const std::string& hyphenationSource = mergedWord.empty() ? word : mergedWord;
+
   // Collect candidate breakpoints (byte offsets and hyphen requirements).
-  auto breakInfos = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+  auto breakInfos = Hyphenator::breakOffsets(hyphenationSource, allowFallbackBreaks);
   if (breakInfos.empty()) {
     return false;
   }
@@ -1078,18 +1109,26 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // Iterate over each legal breakpoint and retain the widest prefix that still fits.
   for (const auto& info : breakInfos) {
     const size_t offset = info.byteOffset;
-    if (offset == 0 || offset >= word.size()) {
+    if (offset == 0 || offset >= hyphenationSource.size()) {
       continue;
     }
 
+    // Offsets at or before the focus boundary are unusable: the bold prefix is a separate token
+    // already placed on this line, so only the suffix token can still be split. Degenerates to
+    // the plain `offset == 0` guard when no merge happened (focusPrefixBytes stays 0).
+    if (offset <= focusPrefixBytes) {
+      continue;
+    }
+    const size_t localOffset = offset - focusPrefixBytes;
+
     const bool needsHyphen = info.requiresInsertedHyphen;
-    const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, offset), style, needsHyphen);
+    const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, localOffset), style, needsHyphen);
     if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
       continue;  // Skip if too wide or not an improvement
     }
 
     chosenWidth = prefixWidth;
-    chosenOffset = offset;
+    chosenOffset = localOffset;
     chosenNeedsHyphen = needsHyphen;
   }
 
