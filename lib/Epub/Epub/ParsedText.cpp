@@ -232,29 +232,19 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
 }
 
-// Returns true if a token ends with a hyphen or dash that permits a line break after it, so a
-// glued following segment can still start a new line. Defers to isExplicitHyphen() -- the same
-// character set Hyphenator uses to find breaks in a whole word -- rather than keeping a second
-// list here, which would silently stop matching the moment that one changes.
-//
-// Two members of that set cannot permit a following break, and both exclusions are about the
-// character itself rather than about this call site:
-//   U+00AD soft hyphen      - renders as nothing, so a break after a bare one shows no hyphen.
-//                             Only a hyphenation break, which substitutes a real '-', may use it.
-//   U+2011 non-breaking hyphen - visible, but its entire purpose is to forbid the break.
+// True when a token ends with a hyphen or dash that allows a line break after it. U+00AD is
+// excluded because it renders as nothing, so only a hyphenation break -- which substitutes a
+// visible '-' -- may use it; U+2011 because forbidding that break is its purpose.
 bool endsWithBreakableHyphen(const std::string& token) {
   if (token.empty()) return false;
   const uint32_t cp = lastCodepoint(token);
   return isExplicitHyphen(cp) && !isSoftHyphen(cp) && cp != NON_BREAKING_HYPHEN_CP;
 }
 
-// Focus Reading renders the first `focusBoundary` bytes of a token bold and the remainder at the
-// token's own style; 0 means no split. These two helpers are the only code that knows a single
-// token can carry two weights, so the rest of layout keeps treating it as one indivisible word.
-//
-// The bold prefix is at most 9 codepoints (see addWord), i.e. 36 UTF-8 bytes, so it is copied to a
-// stack buffer instead of a substring: this runs once per word during pagination and must not
-// allocate. The suffix needs no copy at all -- it is already NUL-terminated in place.
+// Focus Reading renders the first `focusBoundary` bytes of a token bold and the rest at the
+// token's own style; 0 means no emphasis. The bold run is at most 9 codepoints (see addWord),
+// so it is copied to a stack buffer rather than a substring: this runs once per word during
+// pagination and must not allocate.
 constexpr size_t FOCUS_PREFIX_BUF_SIZE = 40;
 
 // Advance from the token origin to the start of its regular-weight suffix: the bold prefix plus
@@ -280,8 +270,7 @@ uint16_t measureFocusWordWidth(const GfxRenderer& renderer, const int fontId, co
     return measureWordWidth(renderer, fontId, word, style, appendHyphen);
   }
   if (focusBoundary >= word.size()) {
-    // The bold run covers the whole token (can happen for a split candidate ending on the
-    // boundary). Measure it bold, which is also how the split normalises it afterwards.
+    // The bold run covers the whole token, as for a split candidate ending on the boundary.
     return measureWordWidth(renderer, fontId, word, static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD),
                             appendHyphen);
   }
@@ -291,8 +280,7 @@ uint16_t measureFocusWordWidth(const GfxRenderer& renderer, const int fontId, co
   return measureFocusPrefixAdvance(renderer, fontId, word, style, focusBoundary) + suffixWidth;
 }
 
-// Focus boundary carried by the left part after splitting a token at `splitOffset`: the bold run
-// is clipped to what stays behind. The right part keeps whatever bold run extended past the split.
+// Focus boundaries for the two halves of a token split at `splitOffset`.
 uint8_t focusBoundaryBefore(const uint8_t focusBoundary, const size_t splitOffset) {
   return static_cast<uint8_t>(std::min<size_t>(focusBoundary, splitOffset));
 }
@@ -565,10 +553,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         }
         size_t splitByteOffset = countPtr - reinterpret_cast<const unsigned char*>(segment.data());
 
-        // One token carrying the emphasis as a byte boundary, NOT two glued tokens. The word
-        // stays whole for the hyphenator and the line breaker; the renderer applies BOLD to
-        // bytes [0, splitByteOffset) via the boundary that TextBlock already stores per word.
-        // The style itself is the regular one -- bold is the annotation, not the base.
+        // One token carrying the emphasis as a byte boundary, so the word stays whole for the
+        // hyphenator and the line breaker. The renderer applies BOLD to bytes [0, splitByteOffset).
         words.emplace_back(segment);
         wordStyles.push_back(baseStyle);
         wordContinues.push_back(attach);
@@ -600,11 +586,9 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
 
       // Only the very first segment inherits the original attachToPrevious flag.
-      // Every subsequent segment glues seamlessly to the prefix (attach=true) — except after a
-      // visible hyphen or dash, which is a real break opportunity that non-Focus-Reading mode
-      // gets for free (there the compound stays one token and Hyphenator::breakOffsets finds it).
-      // Same move as the CJK/Korean handling above: continues=false makes the boundary breakable,
-      // noSpaceBefore=true keeps the gap at zero so nothing shifts when it is not broken.
+      // Every subsequent segment glues seamlessly to the prefix, except after a visible hyphen or
+      // dash: there the compound may wrap. Same move as the CJK/Korean handling above --
+      // continues=false makes the boundary breakable, noSpaceBefore=true keeps the gap at zero.
       const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
       processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : !breakAfterPrev,
                      isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
@@ -1141,9 +1125,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   const uint8_t focusBoundary = wordFocusBoundary[wordIndex];
 
-  // Collect candidate breakpoints (byte offsets and hyphen requirements). Focus Reading emphasis
-  // is a byte annotation on this token, not a token split, so the hyphenator sees the whole word
-  // and every legal break is reachable -- including one landing exactly on the bold boundary.
+  // Collect candidate breakpoints (byte offsets and hyphen requirements). Focus emphasis is a byte
+  // annotation, so the hyphenator sees the whole word and every legal break is reachable.
   auto breakInfos = Hyphenator::breakOffsets(word, allowFallbackBreaks);
   if (breakInfos.empty()) {
     return false;
@@ -1196,14 +1179,12 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   words.insert(words.begin() + wordIndex + 1, remainder);
   wordStyles.insert(wordStyles.begin() + wordIndex + 1, style);
   insertVisibleOffset(wordIndex + 1, remainderOffset);
-  // Emphasis follows the text across the split: the part that stays keeps the bold run clipped to
-  // it, the part that wraps keeps whatever bold run reached past the break. A break at or after the
-  // boundary therefore leaves the remainder fully regular, which is the common case.
+  // Emphasis follows the text across the split, so a break at or after the boundary leaves the
+  // remainder fully regular.
   wordFocusBoundary.insert(wordFocusBoundary.begin() + wordIndex + 1, focusBoundaryAfter(focusBoundary, chosenOffset));
   wordFocusBoundary[wordIndex] = focusBoundaryBefore(focusBoundary, chosenOffset);
-  // Invariant: a boundary is always strictly inside its token. A break exactly on the boundary
-  // leaves an all-bold left part, which is expressed the way addWord expresses it -- BOLD in the
-  // style, boundary 0 -- so downstream never has to special-case boundary == size.
+  // Invariant: a boundary is always strictly inside its token, so an all-bold part carries BOLD in
+  // its style with boundary 0 and nothing downstream special-cases boundary == size.
   if (wordFocusBoundary[wordIndex] >= words[wordIndex].size()) {
     wordStyles[wordIndex] = static_cast<EpdFontFamily::Style>(wordStyles[wordIndex] | EpdFontFamily::BOLD);
     wordFocusBoundary[wordIndex] = 0;
@@ -1570,9 +1551,8 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     return;
   }
 
-  // Each word already is one TextBlock entry carrying its own bold-prefix boundary -- there is
-  // nothing to merge. All that remains is the suffix x offset the renderer needs to resume drawing
-  // in regular weight, which is the bold prefix's advance within the word.
+  // Each word is one TextBlock entry carrying its own boundary; all that remains is the suffix x
+  // offset the renderer needs to resume in regular weight, i.e. the bold prefix's advance.
   std::vector<uint8_t> outBoundaries;
   std::vector<uint16_t> outSuffixX;
   outBoundaries.reserve(lineWordCount);

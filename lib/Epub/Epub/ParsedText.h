@@ -27,10 +27,9 @@ class ParsedText {
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;      // true = word attaches to previous with no break
   std::vector<bool> wordNoSpaceBefore;  // true = may break before token, but no synthetic space when joined
-  // Focus Reading emphasis, as a byte offset into the token rather than a token split: bytes
-  // [0, wordFocusBoundary) render bold, the rest at wordStyles. 0 = no split. Keeping the word
-  // whole is what lets the hyphenator see "certainly" instead of "cer" + "tainly"; TextBlock
-  // already stores emphasis this way, so extractLine passes it straight through.
+  // Focus Reading emphasis: bytes [0, wordFocusBoundary) render bold, the rest at wordStyles.
+  // 0 = none. An annotation rather than a token split, so the hyphenator and line breaker still
+  // see whole words; TextBlock stores emphasis the same way, so extractLine passes it through.
   std::vector<uint8_t> wordFocusBoundary;
   // Zero-based visible Unicode-codepoint offsets in the spine body, stored as
   // uint16_t deltas from a shared base to keep this layout-only metadata small.
