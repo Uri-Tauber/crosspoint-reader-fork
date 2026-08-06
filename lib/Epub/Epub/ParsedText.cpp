@@ -11,6 +11,7 @@
 #include <limits>
 #include <vector>
 
+#include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
 constexpr int MAX_COST = std::numeric_limits<int>::max();
@@ -20,6 +21,8 @@ namespace {
 // Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
 constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
+// U+2011: visible hyphen whose defining property is that no line break may follow it.
+constexpr uint32_t NON_BREAKING_HYPHEN_CP = 0x2011;
 // Paragraph-level direction: scan the first N words to find base direction.
 constexpr size_t RTL_PARAGRAPH_PROBE_WORDS = 3;
 // Per-word: scan enough chars to see through leading neutrals (quotes, numbers)
@@ -229,14 +232,20 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
 }
 
-// Returns true if a token ends with a visible hyphen or dash. Such a token is a legitimate
-// line-break opportunity even when the next segment was glued to it in the source text.
-// Soft hyphens (U+00AD) are deliberately excluded: they render as nothing unless a hyphenation
-// break converts one into a real '-', so breaking after a bare one would leave no visible hyphen.
+// Returns true if a token ends with a hyphen or dash that permits a line break after it, so a
+// glued following segment can still start a new line. Defers to isExplicitHyphen() -- the same
+// character set Hyphenator uses to find breaks in a whole word -- rather than keeping a second
+// list here, which would silently stop matching the moment that one changes.
+//
+// Two members of that set cannot permit a following break, and both exclusions are about the
+// character itself rather than about this call site:
+//   U+00AD soft hyphen      - renders as nothing, so a break after a bare one shows no hyphen.
+//                             Only a hyphenation break, which substitutes a real '-', may use it.
+//   U+2011 non-breaking hyphen - visible, but its entire purpose is to forbid the break.
 bool endsWithBreakableHyphen(const std::string& token) {
   if (token.empty()) return false;
   const uint32_t cp = lastCodepoint(token);
-  return cp == '-' || cp == 0x2013 || cp == 0x2014;
+  return isExplicitHyphen(cp) && !isSoftHyphen(cp) && cp != NON_BREAKING_HYPHEN_CP;
 }
 
 // Focus Reading renders the first `focusBoundary` bytes of a token bold and the remainder at the
