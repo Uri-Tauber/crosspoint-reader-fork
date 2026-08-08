@@ -11,6 +11,7 @@
 #include <limits>
 #include <vector>
 
+#include "TokenBoundary.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -21,8 +22,6 @@ namespace {
 // Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
 constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
-// U+2011: visible hyphen whose defining property is that no line break may follow it.
-constexpr uint32_t NON_BREAKING_HYPHEN_CP = 0x2011;
 // Paragraph-level direction: scan the first N words to find base direction.
 constexpr size_t RTL_PARAGRAPH_PROBE_WORDS = 3;
 // Per-word: scan enough chars to see through leading neutrals (quotes, numbers)
@@ -237,8 +236,7 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
 // visible '-' -- may use it; U+2011 because forbidding that break is its purpose.
 bool endsWithBreakableHyphen(const std::string& token) {
   if (token.empty()) return false;
-  const uint32_t cp = lastCodepoint(token);
-  return isExplicitHyphen(cp) && !isSoftHyphen(cp) && cp != NON_BREAKING_HYPHEN_CP;
+  return TokenBoundary::allowsBreakAfterExplicitHyphen(lastCodepoint(token));
 }
 
 // Focus Reading renders the first `focusBoundary` bytes of a token bold and the rest at the
@@ -586,11 +584,11 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
 
       // Only the very first segment inherits the original attachToPrevious flag.
-      // Every subsequent segment glues seamlessly to the prefix, except after a visible hyphen or
-      // dash: there the compound may wrap. Same move as the CJK/Korean handling above --
-      // continues=false makes the boundary breakable, noSpaceBefore=true keeps the gap at zero.
+      // Every subsequent segment glues seamlessly to the prefix. After a visible explicit-hyphen
+      // character, continues=true + noSpaceBefore=true records a breakable attachment: it may wrap,
+      // but when it stays on the line it receives kerning only, never a space or justification.
       const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
-      processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : !breakAfterPrev,
+      processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : true,
                      isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
 
       // Setup for the next segment
@@ -604,7 +602,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   size_t segmentLen = end - segmentStart;
   std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
   const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
-  processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : !breakAfterPrev,
+  processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : true,
                  isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
   if (wordStartsRtl) {
     hasRtlWord = true;
@@ -955,14 +953,14 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     for (size_t j = i; j < totalWordCount; ++j) {
       // Add space before word j, unless it's the first word on the line or a continuation
       int gap = 0;
-      if (j > static_cast<size_t>(i) && noSpaceBeforeVec[j]) {
+      if (j > static_cast<size_t>(i) && continuesVec[j]) {
+        // Attached and breakable-attached boundaries both use kerning when kept on one line.
+        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
+      } else if (j > static_cast<size_t>(i) && noSpaceBeforeVec[j]) {
         gap = 0;
-      } else if (j > static_cast<size_t>(i) && !continuesVec[j]) {
+      } else if (j > static_cast<size_t>(i)) {
         gap =
             renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      } else if (j > static_cast<size_t>(i) && continuesVec[j]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
       }
 
       // Calculate extraStartOffset for the first word on the line (i) (protect left margin)
@@ -974,8 +972,9 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
         break;
       }
 
-      // Cannot break after word j if the next word attaches to it (continuation group)
-      if (j + 1 < totalWordCount && continuesVec[j + 1]) {
+      // A normal continuation is unbreakable. continues=true + noSpaceBefore=true is the compact
+      // breakable-attachment state used after explicit hyphen characters.
+      if (j + 1 < totalWordCount && !TokenBoundary::allowsBreak(continuesVec[j + 1], noSpaceBeforeVec[j + 1])) {
         continue;
       }
 
@@ -1063,15 +1062,15 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
     while (currentIndex < wordWidths.size()) {
       const bool isFirstWord = currentIndex == lineStart;
       int spacing = 0;
-      if (!isFirstWord && noSpaceBeforeVec[currentIndex]) {
-        spacing = 0;
-      } else if (!isFirstWord && !continuesVec[currentIndex]) {
-        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
-                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
-      } else if (!isFirstWord && continuesVec[currentIndex]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
+      if (!isFirstWord && continuesVec[currentIndex]) {
+        // Attached and breakable-attached boundaries both use kerning when kept on one line.
         spacing = renderer.getKerning(fontId, lastCodepoint(words[currentIndex - 1]),
                                       firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
+      } else if (!isFirstWord && noSpaceBeforeVec[currentIndex]) {
+        spacing = 0;
+      } else if (!isFirstWord) {
+        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
+                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
       }
       const int candidateWidth = spacing + wordWidths[currentIndex];
 
@@ -1104,7 +1103,8 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
 
     // Don't break before a continuation word (e.g., orphaned "?" after "question").
     // Backtrack to the start of the continuation group so the whole group moves to the next line.
-    while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() && continuesVec[currentIndex]) {
+    while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() &&
+           !TokenBoundary::allowsBreak(continuesVec[currentIndex], noSpaceBeforeVec[currentIndex])) {
       --currentIndex;
     }
 
@@ -1272,24 +1272,18 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
     lineWordWidthSum += wordWidths[lastBreakAt + wordIdx];
-    // Count gaps: each word after the first creates a gap, unless it's a continuation
-    if (wordIdx > 0 && noSpaceBeforeVec[lastBreakAt + wordIdx]) {
-      // Unicode break opportunity with no inserted Latin-style space. It is still
-      // a stretchable gap for justified CJK/Korean text.
+    if (wordIdx == 0) continue;
+    const size_t boundaryIdx = lastBreakAt + wordIdx;
+    const bool isSpaceToken = lineWords[wordIdx] == " ";
+    if (TokenBoundary::isJustifiableGap(continuesVec[boundaryIdx], noSpaceBeforeVec[boundaryIdx], isSpaceToken)) {
       actualGapCount++;
-    } else if (wordIdx > 0 && !continuesVec[lastBreakAt + wordIdx]) {
-      actualGapCount++;
-      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(lineWords[wordIdx - 1]),
-                                                   firstCodepoint(lineWords[wordIdx]), lineWordStyles[wordIdx - 1]);
-    } else if (wordIdx > 0 && continuesVec[lastBreakAt + wordIdx]) {
-      // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
-      // count them as justifiable gaps so justifyExtra is distributed to them too.
-      if (lineWords[wordIdx] == " ") {
-        actualGapCount++;
-      }
-      // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
+    }
+    if (continuesVec[boundaryIdx]) {
       totalNaturalGaps += renderer.getKerning(fontId, lastCodepoint(lineWords[wordIdx - 1]),
                                               firstCodepoint(lineWords[wordIdx]), lineWordStyles[wordIdx - 1]);
+    } else if (!noSpaceBeforeVec[boundaryIdx]) {
+      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(lineWords[wordIdx - 1]),
+                                                   firstCodepoint(lineWords[wordIdx]), lineWordStyles[wordIdx - 1]);
     }
   }
 
