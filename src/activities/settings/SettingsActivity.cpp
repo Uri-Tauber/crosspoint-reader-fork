@@ -121,8 +121,7 @@ void SettingsActivity::rebuildSettingsLists() {
 void SettingsActivity::onEnter() {
   UiTabListActivity::onEnter();
 
-  // Reset selection to first category (ring position 0, the tab bar, comes
-  // from the base's per-tab nav reset)
+  // Reset selection to the first category with the tab bar focused.
   selectedCategoryIndex = 0;
   preserveQuickResumeTimeoutOn =
       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
@@ -149,7 +148,6 @@ void SettingsActivity::selectCategory(const int categoryIndex) {
       break;
   }
   settingsCount = static_cast<int>(currentSettings->size());
-  activeNav().top = 0;  // category switches start the list at the top (no per-tab memory here)
   rebuildRowItems();
 }
 
@@ -173,7 +171,7 @@ void SettingsActivity::rebuildRowItems() {
 void SettingsActivity::onTabAction(const int index) {
   if (optionPopup.isActive()) return;
   selectCategory(index);
-  activeNav().selected = 0;  // tab taps land with the tab bar focused
+  focusTabBar();
   // The switched-to tab repaints as the selected pill; a flash overlay on top
   // of it just repaints the pill in the focused style.
   app.clearTapFlash();
@@ -181,7 +179,7 @@ void SettingsActivity::onTabAction(const int index) {
 
 void SettingsActivity::activateIndex(const int index) {
   if (optionPopup.isActive()) return;
-  (void)index;  // toggleCurrentSetting reads the ring position
+  (void)index;  // toggleCurrentSetting reads the base-owned row selection
   // Most rows repaint a different surface (popup, sub-activity, new value);
   // a lingering tap flash would gray an unrelated element.
   app.clearTapFlash();
@@ -211,19 +209,22 @@ bool SettingsActivity::handleCustomInput() {
 }
 
 void SettingsActivity::stepTab(const int direction) {
-  // Ring position 0 stays on the tab bar; a row selection collapses to the
-  // new category's first row (per-tab memory is deliberately not kept here).
-  const bool onTabBar = ringPos() == 0;
+  // Row focus collapses to the new category's first row; Settings deliberately
+  // does not preserve per-category selection.
+  const bool onTabBar = isTabBarFocused();
   selectedCategoryIndex = direction > 0 ? ButtonNavigator::nextIndex(selectedCategoryIndex, categoryCount)
                                         : ButtonNavigator::previousIndex(selectedCategoryIndex, categoryCount);
   selectCategory(selectedCategoryIndex);
-  activeNav().selected = onTabBar ? 0 : 1;
-  requestUpdate();
+  if (onTabBar) {
+    focusTabBar();
+  } else {
+    focusRow(0);
+  }
 }
 
 bool SettingsActivity::handleButtons() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    if (ringPos() == 0) {
+    if (isTabBarFocused()) {
       stepTab(1);
     } else {
       toggleCurrentSetting();
@@ -233,9 +234,8 @@ bool SettingsActivity::handleButtons() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    if (ringPos() > 0) {
-      activeNav().selected = 0;
-      requestUpdate();
+    if (!isTabBarFocused()) {
+      focusTabBar(/*resetViewport=*/false);
     } else {
       SETTINGS.saveToFile();
       onGoHome();
@@ -247,7 +247,7 @@ bool SettingsActivity::handleButtons() {
 }
 
 void SettingsActivity::toggleCurrentSetting() {
-  int selectedSetting = ringPos() - 1;
+  const int selectedSetting = isTabBarFocused() ? -1 : selectedRow();
   if (selectedSetting < 0 || selectedSetting >= settingsCount) {
     return;
   }
@@ -377,7 +377,7 @@ void SettingsActivity::toggleCurrentSetting() {
   SETTINGS.saveToFile();
   rebuildSettingsLists();
   applyUiSettingChange(setting.valuePtr);
-  activeNav().selected = std::min(ringPos(), settingsCount);
+  clampSelectedRow();
 }
 
 void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged) {
@@ -507,11 +507,11 @@ void SettingsActivity::render(RenderLock&&) {
 
   renderUi();
 
-  const int ring = ringPos();
+  const int selectedSetting = isTabBarFocused() ? -1 : selectedRow();
   const auto confirmLabel =
-      (ring == 0) ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
-                  : (ring > 0 && (*currentSettings)[ring - 1].nameId == StrId::STR_TIME_TO_SLEEP ? tr(STR_SELECT)
-                                                                                                 : tr(STR_TOGGLE));
+      isTabBarFocused()
+          ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
+          : ((*currentSettings)[selectedSetting].nameId == StrId::STR_TIME_TO_SLEEP ? tr(STR_SELECT) : tr(STR_TOGGLE));
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

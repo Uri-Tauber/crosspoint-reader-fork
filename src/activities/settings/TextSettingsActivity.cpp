@@ -79,13 +79,10 @@ void TextSettingsActivity::onEnter() {
   rebuildSizeList();
 
   currentFamilyIndex_ = findCurrentFontIndex(registry_, SETTINGS.sdFontFamilyName, SETTINGS.fontFamily);
-  // Per-tab ring positions (0 = tab bar, 1..N = row). The base reset each
-  // tab's nav with followOnBuild armed, so each tab's first build shows its
-  // remembered selection (Family/Size open on the current item).
-  for (auto& n : tabNavs) n.selected = 1;  // default to the first list row
-  tabNavs[static_cast<int>(Tab::Family)].selected = currentFamilyIndex_ + 1;
-  tabNavs[static_cast<int>(Tab::Size)].selected = currentSizeIndex_ + 1;
-  tabNavs[static_cast<int>(tab_)].selected = 0;  // screen opens with the tab bar focused, not a list row
+  for (int i = 0; i < tabCount(); i++) rememberRowForTab(i, 0);
+  rememberRowForTab(static_cast<int>(Tab::Family), currentFamilyIndex_);
+  rememberRowForTab(static_cast<int>(Tab::Size), currentSizeIndex_);
+  focusTabBar();
 
   rebuildRowItems();
 }
@@ -151,10 +148,7 @@ void TextSettingsActivity::onTabAction(const int index) {
   if (tab_ != static_cast<Tab>(index)) {
     tab_ = static_cast<Tab>(index);
     rebuildRowItems();
-    auto& n = activeNav();
-    n.selected = 0;          // tab taps land with the tab bar focused (legacy tap behavior)
-    n.followOnBuild = true;  // pull the new tab's viewport to its remembered selection
-    requestUpdate();
+    focusTabBar();
   }
   // The switched-to tab repaints as the selected pill; a flash overlay on top
   // of it just repaints the pill in the focused style.
@@ -198,10 +192,10 @@ bool TextSettingsActivity::handleButtons() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    if (ringPos() == 0) {
+    if (isTabBarFocused()) {
       switchTab();
     } else {
-      activateRow(ringPos() - 1);
+      activateRow(selectedRow());
     }
     return true;
   }
@@ -260,14 +254,14 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
 }
 
 const char* TextSettingsActivity::confirmLabelText() const {
-  if (ringPos() == 0) {
+  if (isTabBarFocused()) {
     // Confirm on the tab bar advances to the next tab.
     return I18N.get(TAB_NAME_IDS[(static_cast<int>(tab_) + 1) % static_cast<int>(Tab::Count)]);
   }
   switch (tab_) {
     case Tab::Layout:
       // Extra Paragraph Spacing toggles; the rest open a picker
-      return ringPos() - 1 == static_cast<int>(LayoutRow::ParaSpacing) ? tr(STR_TOGGLE) : tr(STR_SELECT);
+      return selectedRow() == static_cast<int>(LayoutRow::ParaSpacing) ? tr(STR_TOGGLE) : tr(STR_SELECT);
     case Tab::Style:
       return tr(STR_TOGGLE);
     default:
@@ -338,7 +332,7 @@ void TextSettingsActivity::applyFamily(int listIndex) {
   // snapped the selection into it, so the Size tab's list and its nav position
   // both have to be rebuilt.
   rebuildSizeList();
-  tabNavs[static_cast<int>(Tab::Size)].selected = currentSizeIndex_ + 1;
+  rememberRowForTab(static_cast<int>(Tab::Size), currentSizeIndex_);
 }
 
 void TextSettingsActivity::activateRow(int row) {
@@ -487,20 +481,21 @@ std::string TextSettingsActivity::styleValueText(int row) const {
 // Only Focus Reading shows in the preview (bold prefixes); the other Style rows
 // have no distinct preview.
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
-  if (ringPos() == 0 || tab_ != Tab::Style) return false;
-  const StyleRow row = static_cast<StyleRow>(ringPos() - 1);
+  if (isTabBarFocused() || tab_ != Tab::Style) return false;
+  const StyleRow row = static_cast<StyleRow>(selectedRow());
   return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
 }
 
 void TextSettingsActivity::switchTab(const int direction) {
-  const bool onTabBar = ringPos() == 0;
+  const bool onTabBar = isTabBarFocused();
   constexpr int count = static_cast<int>(Tab::Count);
   tab_ = static_cast<Tab>((static_cast<int>(tab_) + direction + count) % count);
   rebuildRowItems();
-  auto& n = activeNav();
-  if (onTabBar) n.selected = 0;
-  n.followOnBuild = true;  // pull the new tab's viewport to its remembered selection
-  requestUpdate();
+  if (onTabBar) {
+    focusTabBar();
+  } else {
+    restoreRowFocus();
+  }
 }
 
 int TextSettingsActivity::listCount() const {

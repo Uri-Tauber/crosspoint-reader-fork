@@ -5,13 +5,11 @@
 #include "activities/UiListActivity.h"
 
 // UiListActivity variant for screens with a tab band above the list (Settings,
-// Text Settings). Navigation is a ring: position 0 is the tab bar, 1..N are
-// the list rows, so props.selectedIndex = ring - 1 (-1 = tab band focused).
-// Each tab owns its own ListNav (selection + viewport memory); activeNav()
-// redirects the whole UiListActivity protocol (touch routing, swipe scroll,
-// screen sync) to the active tab's state. Button navigation walks the ring on
-// release and steps the TAB on continuous hold. The tab-bar chrome (pill
-// styles, focused band wash) is shared verbatim via buildTabBar().
+// Text Settings). Each tab owns its own ListNav (row selection + viewport
+// memory), while this base separately tracks whether the tab bar or a row has
+// focus. Button navigation walks the tab-bar + rows ring on release and steps
+// the tab on continuous hold. The tab-bar chrome (pill styles, focused band
+// wash) is shared verbatim via buildTabBar().
 //
 // Subclasses own the button semantics wholesale (handleButtons is pure here:
 // the two existing tab screens differ on press-vs-release and what Back does)
@@ -41,31 +39,33 @@ class UiTabListActivity : public UiListActivity {
   // there is no shared default.
   bool handleButtons() override = 0;
 
-  // --- ring plumbing ---------------------------------------------------------
-  freeink::ui::ListNav& activeNav() override;
-  // Ring position of the active tab (0 = tab bar) for const contexts.
-  int ringPos() const;
-  // ACTION_ROW lands as ring = row + 1, then activateIndex(row).
+  // --- focus + navigation ----------------------------------------------------
+  bool isTabBarFocused() const;
+  int selectedRow() const;
+  void focusTabBar(bool resetViewport = true);
+  void focusRow(int rowIndex);
+  void restoreRowFocus();
+  void rememberRowForTab(int tabIndex, int rowIndex);
+  void clampSelectedRow();
+
   void onRowAction(const freeink::ui::ActionEvent& event) override;
-  // Release walks the ring; continuous hold steps the tab.
   void navigateButtons() override;
-  // Move to a ring position: tab bar rewinds the viewport, a row pulls the
-  // viewport to itself.
-  void moveRingTo(int ringIndex);
 
   // --- screen helpers --------------------------------------------------------
   // The shared tab band: theme-driven pill treatment (label-hugging Lyra vs
   // full-slot RoundedRaff), Lyra focused band wash, always-on divider.
   void buildTabBar(UiScreen& screen);
-  // Ring-aware counterpart of syncListViewport: measures rows, applies the
-  // one-shot follow to the remembered row, clamps, and writes
-  // props.selectedIndex = ring - 1. hasSubtitle: see syncListViewport().
+  // Tab-focus-aware counterpart of syncListViewport. hasSubtitle: see
+  // syncListViewport().
   void syncTabListViewport(UiScreen& screen, freeink::ui::ListProps& props, bool hasSubtitle = false);
 
-  // Per-tab selection/viewport state, sized in onEnter. Protected so subclass
-  // tab-switch code can seed the target tab's ring/viewport.
-  std::vector<freeink::ui::ListNav> tabNavs;
-
  private:
+  freeink::ui::ListNav& activeNav() override;
+  int ringPosition() const;
+  void moveRingTo(int ringIndex);
   static void tabActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
+
+  // Sized once on entry and reused for the activity lifetime.
+  std::vector<freeink::ui::ListNav> tabNavs;
+  bool tabBarFocused = true;
 };

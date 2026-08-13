@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 
+#include <algorithm>
 #include <cassert>
 
 #include "MappedInputManager.h"
@@ -13,9 +14,8 @@ UiTabListActivity::UiTabListActivity(const char* name, GfxRenderer& renderer, Ma
     : UiListActivity(name, renderer, mappedInput) {}
 
 void UiTabListActivity::onEnter() {
-  // Size the per-tab state before the base resets activeNav() (which indexes
-  // into it).
   tabNavs.assign(static_cast<size_t>(tabCount()), fui::ListNav{});
+  tabBarFocused = true;
   UiListActivity::onEnter();
   app.on(ACTION_TAB, &UiTabListActivity::tabActionTrampoline, this);
 }
@@ -28,10 +28,50 @@ fui::ListNav& UiTabListActivity::activeNav() {
   return tabNavs[static_cast<size_t>(activeTab())];
 }
 
-int UiTabListActivity::ringPos() const {
+bool UiTabListActivity::isTabBarFocused() const { return tabBarFocused; }
+
+int UiTabListActivity::selectedRow() const {
   if (tabNavs.empty()) return 0;
   assert(activeTab() >= 0 && static_cast<size_t>(activeTab()) < tabNavs.size());
   return tabNavs[static_cast<size_t>(activeTab())].selected;
+}
+
+int UiTabListActivity::ringPosition() const { return isTabBarFocused() ? 0 : selectedRow() + 1; }
+
+void UiTabListActivity::focusTabBar(const bool resetViewport) {
+  auto& n = activeNav();
+  tabBarFocused = true;
+  if (resetViewport) n.top = 0;
+  requestUpdate();
+}
+
+void UiTabListActivity::focusRow(const int rowIndex) {
+  auto& n = activeNav();
+  tabBarFocused = false;
+  n.selected = rowIndex;
+  n.follow(listCount());
+  requestUpdate();
+}
+
+void UiTabListActivity::restoreRowFocus() {
+  tabBarFocused = false;
+  activeNav().followOnBuild = true;
+  requestUpdate();
+}
+
+void UiTabListActivity::rememberRowForTab(const int tabIndex, const int rowIndex) {
+  assert(tabIndex >= 0 && static_cast<size_t>(tabIndex) < tabNavs.size());
+  tabNavs[static_cast<size_t>(tabIndex)].selected = rowIndex;
+}
+
+void UiTabListActivity::clampSelectedRow() {
+  if (isTabBarFocused()) return;
+  if (listCount() <= 0) {
+    tabBarFocused = true;
+    activeNav().selected = 0;
+    return;
+  }
+  activeNav().selected = std::clamp(selectedRow(), 0, std::max(0, listCount() - 1));
 }
 
 void UiTabListActivity::tabActionTrampoline(const fui::ActionEvent& event, void* user) {
@@ -41,38 +81,30 @@ void UiTabListActivity::tabActionTrampoline(const fui::ActionEvent& event, void*
 }
 
 void UiTabListActivity::onRowAction(const fui::ActionEvent& event) {
-  activeNav().selected = event.value + 1;  // ring position, not row index
+  tabBarFocused = false;
+  activeNav().selected = event.value;
   activateIndex(event.value);
 }
 
 void UiTabListActivity::moveRingTo(const int ringIndex) {
-  auto& n = activeNav();
-  n.selected = ringIndex;
   if (ringIndex == 0) {
-    n.top = 0;
-  } else {
-    // Pull the viewport to the row (ring - 1); ListNav::follow reads
-    // n.selected as a row index, so compute directly here.
-    const uint16_t rows = n.visibleRows > 0 ? static_cast<uint16_t>(n.visibleRows) : 1;
-    n.top = fui::listTopIndexFor(static_cast<int16_t>(ringIndex - 1), static_cast<uint16_t>(n.top < 0 ? 0 : n.top),
-                                 rows, static_cast<uint16_t>(listCount()));
+    focusTabBar();
+    return;
   }
-  requestUpdate();
+  focusRow(ringIndex - 1);
 }
 
 void UiTabListActivity::navigateButtons() {
   // Buttons walk the tab band (index 0) plus the rows (1..listCount).
   const int ringSize = listCount() + 1;
-  buttonNavigator.onNextRelease([this, ringSize] { moveRingTo(ButtonNavigator::nextIndex(ringPos(), ringSize)); });
+  buttonNavigator.onNextRelease([this, ringSize] { moveRingTo(ButtonNavigator::nextIndex(ringPosition(), ringSize)); });
   buttonNavigator.onPreviousRelease(
-      [this, ringSize] { moveRingTo(ButtonNavigator::previousIndex(ringPos(), ringSize)); });
+      [this, ringSize] { moveRingTo(ButtonNavigator::previousIndex(ringPosition(), ringSize)); });
   buttonNavigator.onNextContinuous([this] { stepTab(1); });
   buttonNavigator.onPreviousContinuous([this] { stepTab(-1); });
 }
 
 void UiTabListActivity::syncTabListViewport(UiScreen& screen, fui::ListProps& props, const bool hasSubtitle) {
-  const int count = listCount();
-  auto& n = activeNav();
   int16_t rowHeight = screen.theme().rowHeight;
   if (!mappedInput.hasTouch()) {
     // Non-touch hardware (X3/X4) keeps the original, denser per-theme row
@@ -82,20 +114,8 @@ void UiTabListActivity::syncTabListViewport(UiScreen& screen, fui::ListProps& pr
     rowHeight = static_cast<int16_t>(hasSubtitle ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight);
     props.rowHeight = rowHeight;
   }
-  const uint16_t rows = fui::listVisibleRows(screen.body(), rowHeight, screen.theme().listRowGap);
-  n.visibleRows = rows > 0 ? rows : 1;
-  if (n.followOnBuild) {
-    // Screen entry / tab switch: show the tab's remembered selection, or the
-    // top when the tab bar holds the focus.
-    n.followOnBuild = false;
-    n.top = n.selected > 0 ? static_cast<int>(fui::listTopIndexFor(
-                                 static_cast<int16_t>(n.selected - 1), static_cast<uint16_t>(n.top < 0 ? 0 : n.top),
-                                 static_cast<uint16_t>(n.visibleRows), static_cast<uint16_t>(count)))
-                           : 0;
-  }
-  n.scrollBy(0, count);  // clamp to range
-  props.topIndex = static_cast<uint16_t>(n.top);
-  props.selectedIndex = static_cast<int16_t>(n.selected - 1);  // -1 = tab band focused
+  activeNav().syncToProps(screen.body(), rowHeight, screen.theme().listRowGap, listCount(), props);
+  if (isTabBarFocused()) props.selectedIndex = -1;
 }
 
 void UiTabListActivity::buildTabBar(UiScreen& screen) {
@@ -125,7 +145,7 @@ void UiTabListActivity::buildTabBar(UiScreen& screen) {
   // drawTabBar (slot minus a 4px frame, 8px clearance above the divider) with
   // body-size labels; zero horizontal contentInset disables the tabBar's
   // label-width shrink.
-  const bool tabsFocused = ringPos() == 0;
+  const bool tabsFocused = isTabBarFocused();
   if (metrics.tabPillFullSlot) {
     tabProps.text = screen.theme().bodyText;
     tabProps.tabInset = fui::Insets{4, 4, 7, 4};
