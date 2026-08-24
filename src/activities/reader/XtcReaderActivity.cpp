@@ -16,6 +16,20 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+bool XtcReaderActivity::ensurePageBuffer(const size_t requiredSize) {
+  if (pageBuffer && pageBufferCapacity >= requiredSize) return true;
+
+  auto replacement = makeUniqueNoThrowForOverwrite<uint8_t[]>(requiredSize);
+  if (!replacement) {
+    LOG_ERR("XTR", "Failed to allocate page buffer (%zu bytes)", requiredSize);
+    return false;
+  }
+
+  pageBuffer = std::move(replacement);
+  pageBufferCapacity = requiredSize;
+  return true;
+}
+
 bool XtcReaderActivity::loadBook() {
   auto loadedXtc = makeUniqueNoThrow<Xtc>(bookPath, "/.crosspoint");
   if (!loadedXtc) {
@@ -26,6 +40,14 @@ bool XtcReaderActivity::loadBook() {
     LOG_ERR("XTR", "Failed to load XTC");
     return false;
   }
+
+  const uint16_t pageWidth = loadedXtc->getPageWidth();
+  const uint16_t pageHeight = loadedXtc->getPageHeight();
+  const size_t requiredPageBufferSize = loadedXtc->getBitDepth() == 2
+                                            ? ((static_cast<size_t>(pageWidth) * pageHeight + 7) / 8) * 2
+                                            : ((pageWidth + 7) / 8) * pageHeight;
+  if (!ensurePageBuffer(requiredPageBufferSize)) return false;
+
   xtc = std::move(loadedXtc);
   xtc->setupCacheDir();
   loadProgress();
@@ -34,13 +56,23 @@ bool XtcReaderActivity::loadBook() {
 
 void XtcReaderActivity::openChapterSelection() {
   if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
-    startActivityForResult(std::make_unique<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage),
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               currentPage = std::get<PageResult>(result.data).page;
-                               requestUpdate();
-                             }
-                           });
+    // The parent remains alive on the activity stack. Release up to 96KB while
+    // the chapter picker is active; renderPage() reacquires it on return.
+    pageBuffer.reset();
+    pageBufferCapacity = 0;
+    auto chapterSelection =
+        makeUniqueNoThrow<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage);
+    if (!chapterSelection) {
+      LOG_ERR("XTR", "Failed to allocate chapter selection activity");
+      requestUpdate();
+      return;
+    }
+    startActivityForResult(std::move(chapterSelection), [this](const ActivityResult& result) {
+      if (!result.isCancelled) {
+        currentPage = std::get<PageResult>(result.data).page;
+        requestUpdate();
+      }
+    });
   }
 }
 
@@ -152,9 +184,7 @@ void XtcReaderActivity::renderPage() {
     pageBufferSize = ((pageWidth + 7) / 8) * pageHeight;
   }
 
-  auto pageBuffer = makeUniqueNoThrow<uint8_t[]>(pageBufferSize);
-  if (!pageBuffer) {
-    LOG_ERR("XTR", "Failed to allocate page buffer (%lu bytes)", pageBufferSize);
+  if (!ensurePageBuffer(pageBufferSize)) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_MEMORY_ERROR), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();

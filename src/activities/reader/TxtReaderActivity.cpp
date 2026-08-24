@@ -129,7 +129,7 @@ bool TxtReaderActivity::loadPageAtOffset(GfxRenderer& renderer, size_t offset, s
 
   // Read a chunk from file
   size_t chunkSize = std::min(CHUNK_SIZE, fileSize - offset);
-  auto buffer = makeUniqueNoThrow<uint8_t[]>(chunkSize + 1);
+  auto buffer = makeUniqueNoThrowForOverwrite<uint8_t[]>(chunkSize + 1);
   if (!buffer) {
     LOG_ERR("TRS", "Failed to allocate %zu bytes", chunkSize);
     return false;

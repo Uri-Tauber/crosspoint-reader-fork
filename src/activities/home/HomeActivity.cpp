@@ -140,7 +140,7 @@ bool HomeActivity::storeCoverBuffer() {
   freeCoverBuffer();
   const size_t needed = renderer.getRegionByteSize(coverRectX, coverRectY, coverRectW, coverRectH);
   if (needed == 0) return false;
-  coverBuffer = makeUniqueNoThrow<uint8_t[]>(needed);
+  coverBuffer = makeUniqueNoThrowForOverwrite<uint8_t[]>(needed);
   if (!coverBuffer) {
     LOG_ERR("HOME", "OOM: cover buffer (%u bytes)", (unsigned)needed);
     return false;
