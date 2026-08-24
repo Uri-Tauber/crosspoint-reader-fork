@@ -31,6 +31,8 @@ TEST(SemanticVersion, RejectsMalformedNumericCores) {
   EXPECT_FALSE(semantic_version::parse("v1.2", version));
   EXPECT_FALSE(semantic_version::parse("1.2.3.4", version));
   EXPECT_FALSE(semantic_version::parse("1.2.3 unknown", version));
+  EXPECT_FALSE(semantic_version::parse("1.2.3-", version));
+  EXPECT_FALSE(semantic_version::parse("1.2.3+", version));
   EXPECT_FALSE(semantic_version::parse("4294967296.0.0", version));
 }
 

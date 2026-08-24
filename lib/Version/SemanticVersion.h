@@ -61,8 +61,12 @@ inline bool parse(std::string_view text, Version& version) {
     if (first != '-' && first != '+' && !detail::isAsciiLetter(first)) return false;
 
     if (first == '-') {
+      if (suffix.size() == 1) return false;
       suffix.remove_prefix(1);
       parsed.releaseCandidate = detail::startsWithRc(suffix);
+    } else if (first == '+') {
+      if (suffix.size() == 1) return false;
+      suffix.remove_prefix(1);
     } else if (detail::isAsciiLetter(first)) {
       parsed.releaseCandidate = detail::startsWithRc(suffix);
     }
