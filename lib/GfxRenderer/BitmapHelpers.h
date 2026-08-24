@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <memory>
 
 struct BmpHeader;
 
@@ -24,14 +23,16 @@ void createBmpHeader(BmpHeader* bmpHeader, int width, int height, BmpRowOrder ro
 //     1/8
 class Atkinson1BitDitherer {
  public:
-  explicit Atkinson1BitDitherer(int width)
-      : width(width),
-        errorRow0(std::make_unique<int16_t[]>(width + 4)),
-        errorRow1(std::make_unique<int16_t[]>(width + 4)),
-        errorRow2(std::make_unique<int16_t[]>(width + 4)) {
-    std::fill(errorRow0.get(), errorRow0.get() + (width + 4), int16_t(0));
-    std::fill(errorRow1.get(), errorRow1.get() + (width + 4), int16_t(0));
-    std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
+  explicit Atkinson1BitDitherer(int width) : width(width) {
+    errorRow0 = new int16_t[width + 4]();  // Current row
+    errorRow1 = new int16_t[width + 4]();  // Next row
+    errorRow2 = new int16_t[width + 4]();  // Row after next
+  }
+
+  ~Atkinson1BitDitherer() {
+    delete[] errorRow0;
+    delete[] errorRow1;
+    delete[] errorRow2;
   }
 
   // EXPLICITLY DELETE THE COPY CONSTRUCTOR
@@ -75,24 +76,24 @@ class Atkinson1BitDitherer {
   }
 
   void nextRow() {
-    auto temp = std::move(errorRow0);
-    errorRow0 = std::move(errorRow1);
-    errorRow1 = std::move(errorRow2);
-    errorRow2 = std::move(temp);
-    std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
+    int16_t* temp = errorRow0;
+    errorRow0 = errorRow1;
+    errorRow1 = errorRow2;
+    errorRow2 = temp;
+    memset(errorRow2, 0, (width + 4) * sizeof(int16_t));
   }
 
   void reset() {
-    std::fill(errorRow0.get(), errorRow0.get() + (width + 4), int16_t(0));
-    std::fill(errorRow1.get(), errorRow1.get() + (width + 4), int16_t(0));
-    std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
+    memset(errorRow0, 0, (width + 4) * sizeof(int16_t));
+    memset(errorRow1, 0, (width + 4) * sizeof(int16_t));
+    memset(errorRow2, 0, (width + 4) * sizeof(int16_t));
   }
 
  private:
   int width;
-  std::unique_ptr<int16_t[]> errorRow0;
-  std::unique_ptr<int16_t[]> errorRow1;
-  std::unique_ptr<int16_t[]> errorRow2;
+  int16_t* errorRow0;
+  int16_t* errorRow1;
+  int16_t* errorRow2;
 };
 
 // Atkinson dithering - distributes only 6/8 (75%) of error for cleaner results
@@ -103,16 +104,17 @@ class Atkinson1BitDitherer {
 // Less error buildup = fewer artifacts than Floyd-Steinberg
 class AtkinsonDitherer {
  public:
-  explicit AtkinsonDitherer(int width)
-      : width(width),
-        errorRow0(std::make_unique<int16_t[]>(width + 4)),
-        errorRow1(std::make_unique<int16_t[]>(width + 4)),
-        errorRow2(std::make_unique<int16_t[]>(width + 4)) {
-    std::fill(errorRow0.get(), errorRow0.get() + (width + 4), int16_t(0));
-    std::fill(errorRow1.get(), errorRow1.get() + (width + 4), int16_t(0));
-    std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
+  explicit AtkinsonDitherer(int width) : width(width) {
+    errorRow0 = new int16_t[width + 4]();  // Current row
+    errorRow1 = new int16_t[width + 4]();  // Next row
+    errorRow2 = new int16_t[width + 4]();  // Row after next
   }
 
+  ~AtkinsonDitherer() {
+    delete[] errorRow0;
+    delete[] errorRow1;
+    delete[] errorRow2;
+  }
   // **1. EXPLICITLY DELETE THE COPY CONSTRUCTOR**
   AtkinsonDitherer(const AtkinsonDitherer& other) = delete;
 
@@ -173,24 +175,24 @@ class AtkinsonDitherer {
   }
 
   void nextRow() {
-    auto temp = std::move(errorRow0);
-    errorRow0 = std::move(errorRow1);
-    errorRow1 = std::move(errorRow2);
-    errorRow2 = std::move(temp);
-    std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
+    int16_t* temp = errorRow0;
+    errorRow0 = errorRow1;
+    errorRow1 = errorRow2;
+    errorRow2 = temp;
+    memset(errorRow2, 0, (width + 4) * sizeof(int16_t));
   }
 
   void reset() {
-    std::fill(errorRow0.get(), errorRow0.get() + (width + 4), int16_t(0));
-    std::fill(errorRow1.get(), errorRow1.get() + (width + 4), int16_t(0));
-    std::fill(errorRow2.get(), errorRow2.get() + (width + 4), int16_t(0));
+    memset(errorRow0, 0, (width + 4) * sizeof(int16_t));
+    memset(errorRow1, 0, (width + 4) * sizeof(int16_t));
+    memset(errorRow2, 0, (width + 4) * sizeof(int16_t));
   }
 
  private:
   int width;
-  std::unique_ptr<int16_t[]> errorRow0;
-  std::unique_ptr<int16_t[]> errorRow1;
-  std::unique_ptr<int16_t[]> errorRow2;
+  int16_t* errorRow0;
+  int16_t* errorRow1;
+  int16_t* errorRow2;
 };
 
 // Floyd-Steinberg error diffusion dithering with serpentine scanning
@@ -203,13 +205,14 @@ class AtkinsonDitherer {
 //      7/16  X
 class FloydSteinbergDitherer {
  public:
-  explicit FloydSteinbergDitherer(int width)
-      : width(width),
-        rowCount(0),
-        errorCurRow(std::make_unique<int16_t[]>(width + 2)),
-        errorNextRow(std::make_unique<int16_t[]>(width + 2)) {
-    std::fill(errorCurRow.get(), errorCurRow.get() + (width + 2), int16_t(0));
-    std::fill(errorNextRow.get(), errorNextRow.get() + (width + 2), int16_t(0));
+  explicit FloydSteinbergDitherer(int width) : width(width), rowCount(0) {
+    errorCurRow = new int16_t[width + 2]();  // +2 for boundary handling
+    errorNextRow = new int16_t[width + 2]();
+  }
+
+  ~FloydSteinbergDitherer() {
+    delete[] errorCurRow;
+    delete[] errorNextRow;
   }
 
   // **1. EXPLICITLY DELETE THE COPY CONSTRUCTOR**
@@ -293,11 +296,11 @@ class FloydSteinbergDitherer {
   // Call at the end of each row to swap buffers
   void nextRow() {
     // Swap buffers
-    auto temp = std::move(errorCurRow);
-    errorCurRow = std::move(errorNextRow);
-    errorNextRow = std::move(temp);
+    int16_t* temp = errorCurRow;
+    errorCurRow = errorNextRow;
+    errorNextRow = temp;
     // Clear the next row buffer
-    std::fill(errorNextRow.get(), errorNextRow.get() + (width + 2), int16_t(0));
+    memset(errorNextRow, 0, (width + 2) * sizeof(int16_t));
     rowCount++;
   }
 
@@ -306,14 +309,14 @@ class FloydSteinbergDitherer {
 
   // Reset for a new image or MCU block
   void reset() {
-    std::fill(errorCurRow.get(), errorCurRow.get() + (width + 2), int16_t(0));
-    std::fill(errorNextRow.get(), errorNextRow.get() + (width + 2), int16_t(0));
+    memset(errorCurRow, 0, (width + 2) * sizeof(int16_t));
+    memset(errorNextRow, 0, (width + 2) * sizeof(int16_t));
     rowCount = 0;
   }
 
  private:
   int width;
   int rowCount;
-  std::unique_ptr<int16_t[]> errorCurRow;
-  std::unique_ptr<int16_t[]> errorNextRow;
+  int16_t* errorCurRow;
+  int16_t* errorNextRow;
 };
