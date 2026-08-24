@@ -152,7 +152,7 @@ void XtcReaderActivity::renderPage() {
     pageBufferSize = ((pageWidth + 7) / 8) * pageHeight;
   }
 
-  uint8_t* pageBuffer = static_cast<uint8_t*>(malloc(pageBufferSize));
+  auto pageBuffer = makeUniqueNoThrow<uint8_t[]>(pageBufferSize);
   if (!pageBuffer) {
     LOG_ERR("XTR", "Failed to allocate page buffer (%lu bytes)", pageBufferSize);
     renderer.clearScreen();
@@ -161,11 +161,10 @@ void XtcReaderActivity::renderPage() {
     return;
   }
 
-  size_t bytesRead = xtc->loadPage(currentPage, pageBuffer, pageBufferSize);
+  size_t bytesRead = xtc->loadPage(currentPage, pageBuffer.get(), pageBufferSize);
   if (bytesRead == 0) {
     LOG_ERR("XTR", "Failed to load page %lu: bufferSize=%lu bitDepth=%u error=%s", currentPage, pageBufferSize,
             bitDepth, xtc::errorToString(xtc->getLastError()));
-    free(pageBuffer);
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_PAGE_LOAD_ERROR), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
@@ -178,8 +177,8 @@ void XtcReaderActivity::renderPage() {
 
   if (bitDepth == 2) {
     const size_t planeSize = (static_cast<size_t>(pageWidth) * pageHeight + 7) / 8;
-    const uint8_t* plane1 = pageBuffer;
-    const uint8_t* plane2 = pageBuffer + planeSize;
+    const uint8_t* plane1 = pageBuffer.get();
+    const uint8_t* plane2 = pageBuffer.get() + planeSize;
     const size_t colBytes = (pageHeight + 7) / 8;
 
     auto getPixelValue = [&](uint16_t x, uint16_t y) -> uint8_t {
@@ -252,8 +251,6 @@ void XtcReaderActivity::renderPage() {
 
     renderer.cleanupGrayscaleWithFrameBuffer();
 
-    free(pageBuffer);
-
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
     return;
   } else {
@@ -273,8 +270,6 @@ void XtcReaderActivity::renderPage() {
       }
     }
   }
-
-  free(pageBuffer);
 
   if (SETTINGS.statusBarSpec().xtcMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_TOP) {
     renderStatusBarOverlay(renderer, StatusBarOverlayPosition::Top);
