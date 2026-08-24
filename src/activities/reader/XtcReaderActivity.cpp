@@ -160,8 +160,9 @@ void XtcReaderActivity::renderPage() {
     renderer.displayBuffer();
     return;
   }
+  uint8_t* const pageData = pageBuffer.get();
 
-  size_t bytesRead = xtc->loadPage(currentPage, pageBuffer.get(), pageBufferSize);
+  size_t bytesRead = xtc->loadPage(currentPage, pageData, pageBufferSize);
   if (bytesRead == 0) {
     LOG_ERR("XTR", "Failed to load page %lu: bufferSize=%lu bitDepth=%u error=%s", currentPage, pageBufferSize,
             bitDepth, xtc::errorToString(xtc->getLastError()));
@@ -177,8 +178,8 @@ void XtcReaderActivity::renderPage() {
 
   if (bitDepth == 2) {
     const size_t planeSize = (static_cast<size_t>(pageWidth) * pageHeight + 7) / 8;
-    const uint8_t* plane1 = pageBuffer.get();
-    const uint8_t* plane2 = pageBuffer.get() + planeSize;
+    const uint8_t* plane1 = pageData;
+    const uint8_t* plane2 = pageData + planeSize;
     const size_t colBytes = (pageHeight + 7) / 8;
 
     auto getPixelValue = [&](uint16_t x, uint16_t y) -> uint8_t {

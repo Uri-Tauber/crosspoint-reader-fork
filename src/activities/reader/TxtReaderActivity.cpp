@@ -134,14 +134,15 @@ bool TxtReaderActivity::loadPageAtOffset(GfxRenderer& renderer, size_t offset, s
     LOG_ERR("TRS", "Failed to allocate %zu bytes", chunkSize);
     return false;
   }
+  uint8_t* const bufferData = buffer.get();
 
-  if (!txt->readContent(buffer.get(), offset, chunkSize)) {
+  if (!txt->readContent(bufferData, offset, chunkSize)) {
     return false;
   }
-  buffer[chunkSize] = '\0';
+  bufferData[chunkSize] = '\0';
 
   if (renderer.isSdCardFont(cachedFontId)) {
-    renderer.ensureSdCardFontReady(cachedFontId, reinterpret_cast<const char*>(buffer.get()), /*styleMask=*/0x01);
+    renderer.ensureSdCardFontReady(cachedFontId, reinterpret_cast<const char*>(bufferData), /*styleMask=*/0x01);
   }
 
   // Parse lines from buffer
@@ -166,7 +167,7 @@ bool TxtReaderActivity::loadPageAtOffset(GfxRenderer& renderer, size_t offset, s
     bool hasCR = (lineContentLen > 0 && buffer[pos + lineContentLen - 1] == '\r');
     size_t displayLen = hasCR ? lineContentLen - 1 : lineContentLen;
 
-    std::string line(reinterpret_cast<char*>(buffer.get() + pos), displayLen);
+    std::string line(reinterpret_cast<char*>(bufferData + pos), displayLen);
     size_t lineBytePos = 0;
 
     do {

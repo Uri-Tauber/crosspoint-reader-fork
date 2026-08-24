@@ -18,9 +18,7 @@ namespace detail {
 
 constexpr bool isAsciiDigit(const char c) { return c >= '0' && c <= '9'; }
 
-constexpr bool isAsciiLetter(const char c) {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-}
+constexpr bool isAsciiLetter(const char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 inline bool parseComponent(const std::string_view text, size_t& pos, uint32_t& value) {
   if (pos >= text.size() || !isAsciiDigit(text[pos])) return false;
@@ -38,8 +36,7 @@ inline bool parseComponent(const std::string_view text, size_t& pos, uint32_t& v
 }
 
 constexpr bool startsWithRc(const std::string_view suffix) {
-  return suffix.size() >= 2 && (suffix[0] == 'r' || suffix[0] == 'R') &&
-         (suffix[1] == 'c' || suffix[1] == 'C');
+  return suffix.size() >= 2 && (suffix[0] == 'r' || suffix[0] == 'R') && (suffix[1] == 'c' || suffix[1] == 'C');
 }
 
 }  // namespace detail
