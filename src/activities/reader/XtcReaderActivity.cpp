@@ -192,10 +192,15 @@ void XtcReaderActivity::renderPage() {
   }
   uint8_t* const pageData = pageBuffer.get();
 
-  size_t bytesRead = xtc->loadPage(currentPage, pageData, pageBufferSize);
-  if (bytesRead == 0) {
-    LOG_ERR("XTR", "Failed to load page %lu: bufferSize=%lu bitDepth=%u error=%s", currentPage, pageBufferSize,
-            bitDepth, xtc::errorToString(xtc->getLastError()));
+  const size_t bytesRead = xtc->loadPage(currentPage, pageData, pageBufferSize);
+  if (bytesRead != pageBufferSize) {
+    if (bytesRead == 0) {
+      LOG_ERR("XTR", "Failed to load page %u: bufferSize=%zu bitDepth=%u error=%s", static_cast<unsigned>(currentPage),
+              pageBufferSize, bitDepth, xtc::errorToString(xtc->getLastError()));
+    } else {
+      LOG_ERR("XTR", "Page %u size mismatch: expected=%zu got=%zu", static_cast<unsigned>(currentPage), pageBufferSize,
+              bytesRead);
+    }
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_PAGE_LOAD_ERROR), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
