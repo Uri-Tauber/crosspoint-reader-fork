@@ -14,6 +14,9 @@ permissions:
 jobs:
   update-comment:
     if: github.event.workflow_run.event == 'pull_request'
+    concurrency:
+      group: pr-firmware-links-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - name: Update firmware links comment
@@ -37,9 +40,9 @@ jobs:
               state: 'all',
               per_page: 100,
             });
-            const associatedPullRequest =
-              pullRequests.find((pr) => pr.state === 'open' && pr.head.sha === run.head_sha) ??
-              pullRequests.find((pr) => pr.head.sha === run.head_sha);
+            const associatedPullRequest = pullRequests.find(
+              (pr) => pr.state === 'open' && pr.head.sha === run.head_sha,
+            );
 
             if (!associatedPullRequest) {
               core.notice(`No pull request found for ${run.head_sha}.`);
@@ -52,8 +55,8 @@ jobs:
               pull_number: associatedPullRequest.number,
             });
 
-            if (pullRequest.head.sha !== run.head_sha) {
-              core.notice(`Skipping superseded workflow run for ${run.head_sha}.`);
+            if (pullRequest.state !== 'open' || pullRequest.head.sha !== run.head_sha) {
+              core.notice(`Skipping closed or superseded workflow run for ${run.head_sha}.`);
               return;
             }
 
