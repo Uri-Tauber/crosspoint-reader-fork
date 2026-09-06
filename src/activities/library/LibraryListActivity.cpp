@@ -13,6 +13,7 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "LibrarySortLabels.h"
 #include "MappedInputManager.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UIScale.h"
@@ -26,50 +27,13 @@ namespace {
 constexpr int SIDE_PADDING = 12;
 constexpr unsigned long LONG_PRESS_MS = 1000;
 
-constexpr int ADDED_TAB = 0;
-constexpr int TITLE_TAB = 1;
-constexpr int AUTHOR_TAB = 2;
-constexpr int TAB_SLOTS = AUTHOR_TAB + 1;
-
-constexpr int sortTabIndex(const library::SortOrder order) {
-  switch (order) {
-    case library::SortOrder::AddedAsc:
-    case library::SortOrder::AddedDesc:
-      return ADDED_TAB;
-    case library::SortOrder::TitleAsc:
-    case library::SortOrder::TitleDesc:
-      return TITLE_TAB;
-    case library::SortOrder::AuthorAsc:
-    case library::SortOrder::AuthorDesc:
-      return AUTHOR_TAB;
-  }
-  return ADDED_TAB;
-}
-
-constexpr bool isDescending(const library::SortOrder order) {
-  return order == library::SortOrder::AddedDesc || order == library::SortOrder::TitleDesc ||
-         order == library::SortOrder::AuthorDesc;
-}
-
-constexpr bool isAddedSort(const library::SortOrder order) {
-  return order == library::SortOrder::AddedAsc || order == library::SortOrder::AddedDesc;
-}
+constexpr bool isDescending(const library::SortOrder order) { return library::descending(order); }
 
 constexpr bool isAuthorSort(const library::SortOrder order) {
   return order == library::SortOrder::AuthorAsc || order == library::SortOrder::AuthorDesc;
 }
-
-constexpr library::SortOrder orderForTab(const int tab, const uint8_t descendingTabs) {
-  const bool descending = (descendingTabs & (1u << tab)) != 0;
-  if (tab == TITLE_TAB) return descending ? library::SortOrder::TitleDesc : library::SortOrder::TitleAsc;
-  if (tab == AUTHOR_TAB) return descending ? library::SortOrder::AuthorDesc : library::SortOrder::AuthorAsc;
-  return descending ? library::SortOrder::AddedDesc : library::SortOrder::AddedAsc;
-}
-
-const char* tabLabelFor(const int tab) {
-  if (tab == TITLE_TAB) return tr(STR_LIBRARY_TAB_TITLE);
-  if (tab == AUTHOR_TAB) return tr(STR_LIBRARY_TAB_AUTHOR);
-  return tr(STR_LIBRARY_TAB_TIME);
+constexpr bool isValueSort(const library::SortOrder order) {
+  return isAuthorSort(order) || library::sortKind(order) >= library::SortKind::Publisher;
 }
 
 }  // namespace
@@ -84,6 +48,11 @@ void LibraryListActivity::onEnter() {
   // render task's SD-loaded fonts read glyph data at draw time, and the walk
   // needs the card to itself.
   RenderLock lock(*this);
+  const uint32_t openStart = millis();
+  const auto openIo = HalFile::ioCounts();
+  enabledSorts = library::sanitizeSorts(SETTINGS.librarySorts);
+  const auto firstSort = library::enabledSortAt(enabledSorts, 0);
+  sortOrder = library::sortOrder(firstSort, firstSort == library::SortKind::Added);
   UiTabListActivity::onEnter();
   app.on(ACTION_SEARCH, &LibraryListActivity::searchActionTrampoline, this);
 
@@ -94,6 +63,20 @@ void LibraryListActivity::onEnter() {
     GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
     if (rebuildIndex()) index.open(library::libraryIndexPath());
   }
+  if (index.isOpen() && !index.hasOrders(enabledSorts)) {
+    GUI.drawPopup(renderer, tr(STR_LIBRARY_PREPARING));
+    index.close();
+    library::BuildStats stats;
+    const bool prepared = library::prepareLibraryOrders(enabledSorts, stats);
+    index.open(library::libraryIndexPath());
+    if (!prepared) {
+      LOG_ERR("LIB", "sort preparation failed");
+      enabledSorts &= index.header().preparedSorts;
+      if (!enabledSorts) enabledSorts = library::DEFAULT_SORTS;
+      const auto fallback = library::enabledSortAt(enabledSorts, 0);
+      sortOrder = library::sortOrder(fallback, fallback == library::SortKind::Added);
+    }
+  }
   degraded = index.isOpen() && index.ranksDegraded();
   if (index.isOpen() && index.dedupDegraded()) {
     LOG_ERR("LIB", "index was built without duplicate detection");
@@ -101,6 +84,10 @@ void LibraryListActivity::onEnter() {
 
   // Entered while Confirm was still held (typical when launched from the home
   // menu): ignore its release, or we would open whatever sits at row 0.
+  const auto openedIo = HalFile::ioCounts();
+  LOG_INF("LIB", "open data: %ums, read %llu bytes, orders %u, min heap since boot %u", millis() - openStart,
+          static_cast<unsigned long long>(openedIo.readBytes - openIo.readBytes), index.header().preparedSorts,
+          ESP.getMinFreeHeap());
   lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   requestUpdate(true);
 }
@@ -112,7 +99,7 @@ void LibraryListActivity::onExit() {
 
 bool LibraryListActivity::rebuildIndex() {
   library::BuildStats stats;
-  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0);
+  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0, SETTINGS.librarySorts);
   if (!ok) {
     LOG_ERR("LIB", "index build failed");
     return false;
@@ -205,7 +192,7 @@ void LibraryListActivity::openSearch() {
 }
 
 void LibraryListActivity::stepTab(const int direction) {
-  const int next = (activeTab() + (direction > 0 ? 1 : TAB_SLOTS - 1)) % TAB_SLOTS;
+  const int next = (activeTab() + (direction > 0 ? 1 : tabCount() - 1)) % tabCount();
   selectTab(next, false);
 }
 
@@ -215,9 +202,11 @@ void LibraryListActivity::onTabAction(const int index) {
 }
 
 void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) {
-  if (index < 0 || index >= TAB_SLOTS) return;
-  if (toggleIfActive && index == activeTab()) descendingTabs ^= static_cast<uint8_t>(1u << index);
-  sortOrder = orderForTab(index, descendingTabs);
+  if (index < 0 || index >= tabCount()) return;
+  const auto kind = library::enabledSortAt(enabledSorts, index);
+  const uint16_t bit = 1u << static_cast<uint8_t>(kind);
+  if (toggleIfActive && index == activeTab()) descendingTabs ^= bit;
+  sortOrder = library::sortOrder(kind, (descendingTabs & bit) != 0);
   // The filter holds positions in the old order, so it must be rebuilt.
   applyFilter();
   // Tab changes happen only while the bar owns focus. A tab's remembered row
@@ -230,11 +219,18 @@ void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) 
 
 void LibraryListActivity::toggleSortDirection() { selectTab(activeTab(), true); }
 
-int LibraryListActivity::tabCount() const { return TAB_SLOTS; }
+int LibraryListActivity::tabCount() const { return library::enabledSortCount(enabledSorts); }
 
-int LibraryListActivity::activeTab() const { return sortTabIndex(sortOrder); }
+int LibraryListActivity::activeTab() const {
+  for (int i = 0; i < tabCount(); ++i) {
+    if (library::enabledSortAt(enabledSorts, i) == library::sortKind(sortOrder)) return i;
+  }
+  return 0;
+}
 
-const char* LibraryListActivity::tabLabel(const int index) const { return tabLabelFor(index); }
+const char* LibraryListActivity::tabLabel(const int index) const {
+  return librarySortLabel(library::enabledSortAt(enabledSorts, index), true);
+}
 
 fui::TabIndicator LibraryListActivity::tabIndicator(const int index) const {
   if (index != activeTab()) return fui::TabIndicator::None;
@@ -255,7 +251,10 @@ int LibraryListActivity::rowFor(const int entry) const {
   return filtered[entry];
 }
 
-bool LibraryListActivity::groupable() const { return !degraded && !isAddedSort(sortOrder) && bookRowCount() > 0; }
+bool LibraryListActivity::groupable() const {
+  return !degraded && (isValueSort(sortOrder) || library::sortKind(sortOrder) == library::SortKind::Title) &&
+         bookRowCount() > 0;
+}
 
 uint32_t LibraryListActivity::titleInitialFor(const int entry) {
   const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
@@ -287,7 +286,7 @@ bool LibraryListActivity::buildGroupStarts() {
   author.reserve(128);
   for (int entry = 0; entry < count; entry++) {
     bool startsGroup = entry == 0;
-    if (isAuthorSort(sortOrder)) {
+    if (isValueSort(sortOrder)) {
       rowTextFor(entry, title, author);
       startsGroup = startsGroup || author != previousAuthor;
       previousAuthor = author;
@@ -393,20 +392,19 @@ void LibraryListActivity::searchActionTrampoline(const fui::ActionEvent&, void* 
 // Title and author for one entry, read straight from the index. Only ever
 // called for rows about to be drawn, so at most a screenful of strings exists
 // at once.
-bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::string& author) {
+bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::string& author, uint32_t* initial) {
   title.clear();
   author.clear();
+  if (initial) *initial = 0;
   const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
   library::ClixRecord record{};
-  std::string name;
-  if (ordinal != 0xFFFF && index.readRecord(ordinal, record) && index.readName(record, name)) {
-    // The build already decided both fields — from the book's own metadata when
-    // it has any, and with one spelling chosen per author across the library.
-    // Re-parsing the name here would throw that away, and only works while the
-    // name still looks like "Title - Author".
-    if (!index.readAuthor(record, author)) author.clear();
-    // The stored title when the book gave one, the filename otherwise.
-    if (!index.readTitle(record, title) || title.empty()) title = name;
+  if (ordinal != 0xFFFF && index.readRecord(ordinal, record)) {
+    if (initial) *initial = library::foldedGroupInitial(std::string_view(record.fold, record.foldLen));
+    if (!index.readDisplay(record, library::sortKind(sortOrder), title, author)) {
+      LOG_ERR("LIB", "library row read failed");
+      title.clear();
+      author.clear();
+    }
   }
   if (title.empty()) title = tr(STR_LIBRARY_UNKNOWN_TITLE);
   return true;
@@ -511,8 +509,8 @@ void LibraryListActivity::navigateButtons() {
 void LibraryListActivity::buildRows(UiScreen& screen) {
   auto& nav = activeNav();
   const int count = listCount();
-  const bool authorGrouped = isAuthorSort(sortOrder);
-  const bool grouped = !isAddedSort(sortOrder);
+  const bool authorGrouped = isValueSort(sortOrder);
+  const bool grouped = groupable();
 
   fui::ListProps props;
   props.count = static_cast<uint16_t>(count);
@@ -549,13 +547,12 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
         formatInitialHeading(titleInitialFor(bookEntry), title);
       }
     } else {
-      rowTextFor(entry, title, author);
       uint32_t initial = 0;
+      rowTextFor(entry, title, author, &initial);
       bool startsGroup = false;
       if (authorGrouped) {
         startsGroup = rows == 0 || author != winAuthors[static_cast<size_t>(rows - 1)];
       } else if (grouped) {
-        initial = titleInitialFor(entry);
         startsGroup = rows == 0 || initial != previousInitial;
         previousInitial = initial;
       }
@@ -593,6 +590,10 @@ void LibraryListActivity::formatInitialHeading(uint32_t initial, std::string& ou
 }
 
 void LibraryListActivity::formatAuthorHeading(const std::string& author, std::string& out) const {
+  if (!isAuthorSort(sortOrder)) {
+    out = author.empty() ? tr(STR_LIBRARY_UNKNOWN_VALUE) : author;
+    return;
+  }
   out = author.empty() ? std::string(tr(STR_LIBRARY_UNKNOWN_AUTHOR)) : author;
   if (author.empty()) return;
   const size_t lastSpace = out.find_last_of(' ');

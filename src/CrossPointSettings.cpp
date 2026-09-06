@@ -1,6 +1,7 @@
 #include "CrossPointSettings.h"
 
 #include <I18n.h>
+#include <LibrarySort.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
@@ -107,6 +108,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
 
   // A uint16_t mask, so it does not fit the uint8_t generic loop. Omitted while
   // unconfigured, so the default keeps following the UI language.
+  doc["librarySorts"] = librarySorts;
   if (keyboardLayouts != 0) {
     doc["keyboardLayouts"] = keyboardLayouts;
   }
@@ -232,6 +234,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   if (doc["keyboardLayouts"].is<uint16_t>()) {
     keyboardLayouts = doc["keyboardLayouts"].as<uint16_t>();
   }
+  if (doc["librarySorts"].is<uint16_t>()) librarySorts = library::sanitizeSorts(doc["librarySorts"].as<uint16_t>());
 
   if (needsResave) {
     LOG_DBG("CPS", "Resaving settings to update format");

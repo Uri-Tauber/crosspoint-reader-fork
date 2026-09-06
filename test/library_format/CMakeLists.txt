@@ -1,6 +1,7 @@
 add_executable(LibraryFormatTest
   LibraryFormatTest.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryFormat.cpp
+  ${REPO_ROOT}/lib/LibraryIndex/LibrarySort.cpp
 )
 
 target_include_directories(LibraryFormatTest PRIVATE

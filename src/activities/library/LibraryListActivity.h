@@ -78,7 +78,7 @@ class LibraryListActivity final : public UiTabListActivity {
   void applyFilter();
   int bookRowCount() const;
   int rowFor(int entry) const;
-  bool rowTextFor(int entry, std::string& title, std::string& author);
+  bool rowTextFor(int entry, std::string& title, std::string& author, uint32_t* initial = nullptr);
   uint32_t titleInitialFor(int entry);
   bool buildGroupStarts();
   int groupForBook(int bookEntry) const;
@@ -101,8 +101,9 @@ class LibraryListActivity final : public UiTabListActivity {
 
   library::LibraryIndexFile index;
   library::SortOrder sortOrder = library::SortOrder::AddedDesc;
+  uint16_t enabledSorts = library::DEFAULT_SORTS;
   // One bit per tab; only Added starts descending.
-  uint8_t descendingTabs = 1u;
+  uint16_t descendingTabs = 1u;
   // Set when the walk finished but the sort did not, so the screen can say the
   // order is discovery order rather than silently showing a wrong one.
   bool degraded = false;

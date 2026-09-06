@@ -387,8 +387,8 @@ Written by `lib/LibraryIndex/LibraryBuilder.cpp`, read by `LibraryIndexFile`. On
 file describing every book on the card, so the shelf can sort and search several
 hundred titles without opening any of them.
 
-Format version 1. An index written by another version fails validation on open
-and is rebuilt; that is the entire migration mechanism.
+Format version 3. Older development indexes trigger a fresh rebuild.
+The reader does not migrate old formats or preserve their arrival history.
 
 ### Layout
 
@@ -397,8 +397,9 @@ and is rebuilt; that is the entire migration mechanism.
 | Header | 0 | 64 bytes, `ClixHeader` |
 | Folders | `folderStart` | length-prefixed paths, one per folder |
 | Records | `recordStart` | `bookCount` × 128-byte `ClixRecord` |
-| Permutations | `permStart` | `bookCount` u16 author order, then `bookCount` u16 arrival order |
-| Name blob | `nameStart` | per record: name, author, title (see below) |
+| Permutations | `permStart` | Seven arrays of `bookCount` u16 ordinals: author, arrival, publication date, publisher, language, series, subject |
+| Name blob | `nameStart` | per record: name, author, title, then five metadata fields (see below) |
+| Metadata | `metadataStart` | `bookCount` × 3048-byte `CachedMetadata`, in core record order |
 
 Sections are 512-byte aligned so each starts on an SD block boundary.
 
@@ -425,6 +426,11 @@ Per record, at `nameStart + nameOff`:
 [nameLen bytes]  filename, without the directory
 [u8][author]     display author, one spelling chosen per authorKey across the library
 [u8][title]      the book's own title, or length 0 if it never gave one
+[u8][date]       publication date
+[u8][publisher]  publisher
+[u8][language]   first language code
+[u8][series]     series name
+[u8][subject]    first subject/tag
 ```
 
 The filename must stay first and stay the filename: `readPath` rebuilds a book's
@@ -433,15 +439,65 @@ That was a real defect, and it is why title has its own field.
 
 ### Header flags
 
-`RANKS_DEGRADED` says the author and arrival orders fell back to walk order, which
+`RANKS_DEGRADED` says one or more sort orders fell back to discovery/title order, which
 happens past `LIBRARY_MAX_SORTED` books, where the sort arrays would not fit in
 RAM.
 
+Extended values are capped at 127 UTF-8 bytes. Empty values sort last ascending
+and first descending; equal values retain title order. Publication dates accept
+`YYYY`, `YYYY-MM`, and `YYYY-MM-DD` with an optional ISO time suffix; invalid
+dates sort as unknown. The library's metadata setting must be enabled to read
+EPUB fields; other file types retain filename titles and unknown metadata.
+
+EPUB 3 series use `belongs-to-collection`, `collection-type=series`, and
+`group-position` refinements, with up to eight collection IDs per package.
+The first identified series takes precedence over Calibre's `calibre:series`
+and `calibre:series_index`. EPUB positions compare integer components; Calibre
+positions compare decimal numbers. Whole volumes compare across conventions;
+within the same volume, EPUB subdivisions precede Calibre fractions. Series
+positions remain in the source cache with their convention and parsed sort keys. Calibre exports ordinary publisher/language/date/subject
+metadata through Dublin Core fields, including repeated `dc:subject` tags.
+
+`librarySorts` in settings is a bit mask of stable `SortKind` IDs. The settings
+screen selects one to four tabs, shown in catalog order; it does not define a
+multi-field comparison. Defaults are Recently added, Title, Author. New sorts
+are appended to the enum and label catalog; stored permutation changes require
+another index format version. The builder reserves seven permutation slots.
+It prepares selected extended orders and records their availability in `preparedSorts`.
+The title order and author canonicalization remain mandatory.
+Author and arrival permutations are always available.
+Missing orders are prepared from cached metadata on the next library open.
+This operation does not walk directories or parse EPUBs.
+
 `DEDUP_DEGRADED` says a directory exceeded the fixed 1024-entry duplicate-key
-buffer, or that its fallible 8 KiB allocation failed. The walk still indexes
+buffer. Allocation failure stops the rebuild and retains the previous index. The walk still indexes
 every enumerated book; it only stops remembering additional identities for
 duplicate-dirent detection, so a damaged FAT may expose duplicates but cannot
 make a real book disappear.
 
 `selfSize` is the expected file size. Comparing it against the real one is a free
 truncation guard: a build cut short by a power failure cannot pass.
+
+
+The metadata section stores modification time, extraction version and status,
+title provenance, original author spelling, source fields, and series position and convention.
+The timestamp packs the FAT modification date in the upper 16 bits and time in the lower 16 bits.
+Zero means that the timestamp is unavailable.
+The section also stores normalization version, normalized text, publication date key, and parsed series key.
+The header stores the metadata toggle used for this generation.
+
+A rebuild reuses metadata only after full-path, file-size, timestamp, and extraction-version checks pass.
+Hash matches select candidates but do not authorize reuse without a full-path comparison.
+Missing timestamps and failed extraction require another parse.
+Rename matching preserves arrival history only.
+An unchanged rebuild retains the index and all prepared orders without sorting.
+After book changes, only selected extended orders remain prepared.
+
+The extended sorter uses one fallible 6 KiB workspace.
+It sorts eight keys at a time, then merges runs through buffered sequential reads.
+Comparators use cached keys and perform no file I/O.
+The 512-book sorting limit remains in effect.
+Allocation and I/O failures retain the previous usable index.
+Installation uses the current-format `.new` and `.bak` recovery transaction.
+
+See [the library test procedure](testing/library-index.md) for host checks and device measurements.

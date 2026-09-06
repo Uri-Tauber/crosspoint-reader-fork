@@ -5,6 +5,7 @@
 #include <deque>
 #include <vector>
 
+#include "../LibraryMetadata.h"
 #include "Epub.h"
 #include "expat.h"
 
@@ -31,6 +32,8 @@ class ContentOpfParser final : public Print {
   BookMetadataCache* cache;
   const bool metadataOnly;
   bool metadataComplete = false;
+  LibraryMetadata* libraryMetadata = nullptr;
+  bool inLibraryMetadata = false;
   HalFile tempItemStore;
   std::string coverItemId;
   bool hasExplicitStartReference = false;
@@ -75,12 +78,14 @@ class ContentOpfParser final : public Print {
   std::vector<std::string> cssFiles;  // CSS stylesheet paths
 
   explicit ContentOpfParser(const std::string& cachePath, const std::string& baseContentPath, const size_t xmlSize,
-                            BookMetadataCache* cache, const bool metadataOnly = false)
+                            BookMetadataCache* cache, const bool metadataOnly = false,
+                            LibraryMetadata* libraryMetadata = nullptr)
       : cachePath(cachePath),
         baseContentPath(baseContentPath),
         remainingSize(xmlSize),
         cache(cache),
-        metadataOnly(metadataOnly) {}
+        metadataOnly(metadataOnly),
+        libraryMetadata(libraryMetadata) {}
   ~ContentOpfParser() override;
 
   bool setup();

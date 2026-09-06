@@ -227,17 +227,46 @@ size_t HalFile::getName(char* name, size_t len) { HAL_FILE_WRAPPED_CALL(getName,
 size_t HalFile::size() { HAL_FILE_FORWARD_CALL(size, ); }              // already thread-safe, no need to wrap
 size_t HalFile::fileSize() { HAL_FILE_FORWARD_CALL(fileSize, ); }      // already thread-safe, no need to wrap
 uint64_t HalFile::fileSize64() { HAL_FILE_FORWARD_CALL(fileSize, ); }  // already thread-safe, no need to wrap
+uint32_t HalFile::modificationTime() {
+  HalStorage::StorageLock lock;
+  uint16_t date = 0, time = 0;
+  if (!impl || !impl->file.getModifyDateTime(&date, &time) || !date) return 0;
+  return (static_cast<uint32_t>(date) << 16) | time;
+}
 bool HalFile::seek(size_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
 bool HalFile::seek64(uint64_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
 bool HalFile::seekCur(int64_t offset) { HAL_FILE_WRAPPED_CALL(seekCur, offset); }
 bool HalFile::seekSet(size_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, offset); }
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, ); }
 size_t HalFile::position() const { HAL_FILE_WRAPPED_CALL(position, ); }
-int HalFile::read(void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(read, buf, count); }
-int HalFile::read() { HAL_FILE_WRAPPED_CALL(read, ); }
-size_t HalFile::write(const uint8_t* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
-size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
-size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }
+namespace {
+// Sixteen bytes of shared counters; updated and sampled under storageMutex.
+HalFile::IoCounts fileIoCounts;
+}  // namespace
+HalFile::IoCounts HalFile::ioCounts() {
+  HalStorage::StorageLock lock;
+  return fileIoCounts;
+}
+int HalFile::read(void* buf, size_t count) {
+  HalStorage::StorageLock lock;
+  assert(impl != nullptr);
+  const int result = impl->file.read(buf, count);
+  if (result > 0) fileIoCounts.readBytes += result;
+  return result;
+}
+int HalFile::read() {
+  uint8_t byte;
+  return read(&byte, 1) == 1 ? byte : -1;
+}
+size_t HalFile::write(const uint8_t* buf, size_t count) {
+  HalStorage::StorageLock lock;
+  assert(impl != nullptr);
+  const size_t result = impl->file.write(buf, count);
+  fileIoCounts.writtenBytes += result;
+  return result;
+}
+size_t HalFile::write(const void* buf, size_t count) { return write(static_cast<const uint8_t*>(buf), count); }
+size_t HalFile::write(uint8_t b) { return write(&b, 1); }
 bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, newPath); }
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, ); }  // already thread-safe, no need to wrap
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }

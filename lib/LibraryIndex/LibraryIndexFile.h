@@ -13,17 +13,9 @@
 #include <string>
 
 #include "LibraryFormat.h"
+#include "LibrarySort.h"
 
 namespace library {
-
-enum class SortOrder : uint8_t {
-  AddedAsc,
-  AddedDesc,
-  TitleAsc,
-  TitleDesc,
-  AuthorAsc,
-  AuthorDesc,
-};
 
 class LibraryIndexFile {
  public:
@@ -36,11 +28,9 @@ class LibraryIndexFile {
   // caused by a format bug is visible in the log rather than looking like a slow
   // first boot.
   bool open(const char* path);
-  // Accept an otherwise valid stale fold so a rebuild can preserve arrival
-  // history without exposing stale sort/search keys to the browser.
-  bool openForReconciliation(const char* path);
   void close();
   bool isOpen() const { return opened; }
+  bool ioFailed() const { return readFailed; }
 
   ClixValidity validity() const { return lastValidity; }
   const ClixHeader& header() const { return head; }
@@ -54,6 +44,8 @@ class LibraryIndexFile {
   uint16_t ordinalForRow(SortOrder order, uint16_t row);
 
   bool readRecord(uint16_t ordinal, ClixRecord& out);
+  bool readMetadata(uint16_t ordinal, CachedMetadata& out);
+  bool hasOrders(uint16_t mask) const { return opened && (head.preparedSorts & mask) == mask; }
 
   // Display basename, exactly as it sits on the card. This is the only string
   // the UI draws, and it is never shortened on disk.
@@ -64,17 +56,19 @@ class LibraryIndexFile {
   // longer carries "Title - Author".
   bool readAuthor(const ClixRecord& record, std::string& out);
   bool readTitle(const ClixRecord& record, std::string& out);
+  bool readDisplay(const ClixRecord& record, SortKind kind, std::string& title, std::string& value);
+  bool readSortValue(const ClixRecord& record, SortKind kind, std::string& out);
 
   // Absolute path of the book, rebuilt from its folder record.
   bool readPath(const ClixRecord& record, std::string& out);
 
  private:
-  bool openImpl(const char* path, bool acceptStaleFold);
   bool readAt(uint32_t offset, void* dst, size_t len);
 
   HalFile file;
   ClixHeader head{};
   bool opened = false;
+  bool readFailed = false;
   ClixValidity lastValidity = ClixValidity::BadMagic;
 };
 

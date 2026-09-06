@@ -130,6 +130,7 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
   if (self->metadataOnly && self->metadataComplete) {
     return;
   }
+  if (self->libraryMetadata && self->inLibraryMetadata) self->libraryMetadata->start(name, atts);
   if (self->metadataOnly && (xmlLocalNameEquals(name, "manifest") || xmlLocalNameEquals(name, "spine") ||
                              xmlLocalNameEquals(name, "guide"))) {
     self->metadataComplete = true;
@@ -143,6 +144,7 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
 
   if (self->state == IN_PACKAGE && xmlLocalNameEquals(name, "metadata")) {
     self->state = IN_METADATA;
+    self->inLibraryMetadata = true;
     return;
   }
 
@@ -383,6 +385,7 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
 
 void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, const int len) {
   auto* self = static_cast<ContentOpfParser*>(userData);
+  if (self->libraryMetadata && self->inLibraryMetadata) self->libraryMetadata->text(s, len);
 
   if (self->metadataOnly && self->metadataComplete) {
     return;
@@ -406,6 +409,8 @@ void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, 
 
 void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) {
   auto* self = static_cast<ContentOpfParser*>(userData);
+  if (self->libraryMetadata && self->inLibraryMetadata) self->libraryMetadata->end(name);
+  if (xmlLocalNameEquals(name, "metadata")) self->inLibraryMetadata = false;
   (void)name;
 
   if (self->metadataOnly && self->metadataComplete) {

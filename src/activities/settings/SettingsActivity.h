@@ -20,12 +20,14 @@ enum class SettingAction {
   Network,
   ClearCache,
   RebuildLibraryIndex,
+  RereadLibraryMetadata,
   CheckForUpdates,
   SdFirmwareUpdate,
   Language,
   DownloadFonts,
   TextSettings,
   KeyboardLayouts,
+  LibrarySorts,
 };
 
 struct SettingInfo {
@@ -199,7 +201,7 @@ class SettingsActivity final : public UiTabListActivity {
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
   void openSleepTimeoutPicker();
-  void rebuildLibraryIndex();
+  void rebuildLibraryIndex(bool forceRefresh = false);
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 

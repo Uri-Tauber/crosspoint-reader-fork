@@ -328,6 +328,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // books someone reads is not necessarily the language of their UI.
   // See keyboard_layouts:: for the bit assignment and the defaulting rules.
   uint16_t keyboardLayouts = 0;
+  uint16_t librarySorts = 7;  // Added, Title, Author; stable LibrarySort IDs.
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
 

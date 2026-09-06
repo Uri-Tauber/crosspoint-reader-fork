@@ -18,6 +18,7 @@
 #include "KOReaderSettingsActivity.h"
 #include "KeyboardLayoutsActivity.h"
 #include "LanguageSelectActivity.h"
+#include "LibrarySortsActivity.h"
 #include "MappedInputManager.h"
 #include "OpdsServerListActivity.h"
 #include "OtaUpdateActivity.h"
@@ -92,6 +93,8 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LIBRARY_REBUILD, SettingAction::RebuildLibraryIndex));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_LIBRARY_REREAD, SettingAction::RereadLibraryMetadata));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_LIBRARY_SORTS, SettingAction::LibrarySorts));
   // OTA fetches this board's own release asset (see OtaUpdater); boards whose
   // asset isn't published yet just report no update available.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
@@ -345,6 +348,9 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ClearCache:
         startActivityForResult(std::make_unique<ClearCacheActivity>(renderer, mappedInput), resultHandler);
         break;
+      case SettingAction::RereadLibraryMetadata:
+        rebuildLibraryIndex(true);
+        break;
       case SettingAction::RebuildLibraryIndex:
         rebuildLibraryIndex();
         break;
@@ -386,6 +392,13 @@ void SettingsActivity::toggleCurrentSetting() {
           LOG_ERR("SETTINGS", "OOM: KeyboardLayoutsActivity");
         }
         break;
+      case SettingAction::LibrarySorts:
+        if (auto activity = makeUniqueNoThrow<LibrarySortsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: LibrarySortsActivity");
+        }
+        break;
       case SettingAction::None:
         // Do nothing
         break;
@@ -425,14 +438,15 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
   }
 }
 
-void SettingsActivity::rebuildLibraryIndex() {
+void SettingsActivity::rebuildLibraryIndex(bool forceRefresh) {
   // Prevent SD-backed fonts from opening a second reader while EPUB metadata is scanned.
   // Keep the popup static because an e-ink refresh per folder would dominate the rebuild.
   RenderLock lock(*this);
   GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
 
   library::BuildStats stats;
-  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0);
+  const bool ok =
+      library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0, SETTINGS.librarySorts, forceRefresh);
   if (ok) {
     LOG_INF("LIB", "rebuild: %u books (%u new, %u renamed, %u removed, %u enriched) in %ums",
             static_cast<unsigned>(stats.books), static_cast<unsigned>(stats.added),

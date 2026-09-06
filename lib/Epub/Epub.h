@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Epub/BookMetadataCache.h"
+#include "Epub/LibraryMetadata.h"
 #include "Epub/css/CssParser.h"
 
 class ZipFile;
@@ -32,7 +33,8 @@ class Epub {
 
   bool findContentOpfFile(std::string* contentOpfFile, ZipFile* sharedZip = nullptr) const;
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, bool writeSpineEntries = true,
-                       bool metadataOnly = false, ZipFile* sharedZip = nullptr);
+                       bool metadataOnly = false, ZipFile* sharedZip = nullptr,
+                       LibraryMetadata* libraryMetadata = nullptr);
   bool parseTocNcxFile() const;
   bool parseTocNavFile() const;
   void discoverCssFilesFromZip();
@@ -46,7 +48,7 @@ class Epub {
   ~Epub() = default;
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
-  bool loadMetadata(std::string& title, std::string& author);
+  bool loadMetadata(std::string& title, std::string& author, LibraryMetadata* libraryMetadata = nullptr);
   bool clearCache() const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;

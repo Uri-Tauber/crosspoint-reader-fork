@@ -51,7 +51,7 @@ bool Epub::findContentOpfFile(std::string* contentOpfFile, ZipFile* sharedZip) c
 }
 
 bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const bool writeSpineEntries,
-                           const bool metadataOnly, ZipFile* sharedZip) {
+                           const bool metadataOnly, ZipFile* sharedZip, LibraryMetadata* libraryMetadata) {
   std::string contentOpfFilePath;
   if (!findContentOpfFile(&contentOpfFilePath, sharedZip)) {
     LOG_ERR("EBP", "Could not find content.opf in zip");
@@ -71,7 +71,7 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
   }
 
   ContentOpfParser opfParser(getCachePath(), getBasePath(), contentOpfSize,
-                             writeSpineEntries ? bookMetadataCache.get() : nullptr, metadataOnly);
+                             writeSpineEntries ? bookMetadataCache.get() : nullptr, metadataOnly, libraryMetadata);
   if (!opfParser.setup()) {
     LOG_ERR("EBP", "Could not setup content.opf parser");
     return false;
@@ -593,17 +593,19 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   return true;
 }
 
-bool Epub::loadMetadata(std::string& title, std::string& author) {
+bool Epub::loadMetadata(std::string& title, std::string& author, LibraryMetadata* libraryMetadata) {
   title.clear();
   author.clear();
 
-  auto metadataCache = makeUniqueNoThrow<BookMetadataCache>(cachePath);
+  if (libraryMetadata) libraryMetadata->reset();
+  // book.bin does not carry the library's extended fields.
+  auto metadataCache = libraryMetadata ? nullptr : makeUniqueNoThrow<BookMetadataCache>(cachePath);
   if (metadataCache && metadataCache->load()) {
     title = metadataCache->coreMetadata.title;
     author = metadataCache->coreMetadata.author;
     return true;
   }
-  if (!metadataCache) {
+  if (!metadataCache && !libraryMetadata) {
     LOG_ERR("EBP", "Could not allocate metadata cache reader");
   }
   metadataCache.reset();
@@ -615,7 +617,8 @@ bool Epub::loadMetadata(std::string& title, std::string& author) {
   }
 
   BookMetadataCache::BookMetadata metadata;
-  const bool loaded = parseContentOpf(metadata, /*writeSpineEntries=*/false, /*metadataOnly=*/true, &zip);
+  const bool loaded =
+      parseContentOpf(metadata, /*writeSpineEntries=*/false, /*metadataOnly=*/true, &zip, libraryMetadata);
   zip.close();
   if (!loaded) return false;
 

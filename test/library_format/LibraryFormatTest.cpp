@@ -7,6 +7,54 @@
 
 using namespace library;
 
+TEST(LibrarySort, ValidatesSelectionsAndMapsNonDefaultTabs) {
+  EXPECT_EQ(sanitizeSorts(0), DEFAULT_SORTS);
+  EXPECT_EQ(enabledSortCount(sanitizeSorts(0xffff)), 4);
+  const uint16_t chosen = (1u << 5) | (1u << 6);
+  EXPECT_EQ(enabledSortAt(chosen, 0), SortKind::Language);
+  EXPECT_EQ(enabledSortAt(chosen, 1), SortKind::Series);
+  EXPECT_EQ(sortKind(sortOrder(SortKind::Series, true)), SortKind::Series);
+  EXPECT_TRUE(descending(sortOrder(SortKind::Series, true)));
+}
+
+TEST(LibrarySort, PublicationDatesAreChronologicalAndRejectInvalidValues) {
+  EXPECT_EQ(publicationDateKey("1999"), 19990000u);
+  EXPECT_EQ(publicationDateKey("2000-02"), 20000200u);
+  EXPECT_EQ(publicationDateKey("2000-02-29T12:00:00Z"), 20000229u);
+  EXPECT_EQ(publicationDateKey("1900-02-29"), 0u);
+  EXPECT_EQ(publicationDateKey("2020-13-01"), 0u);
+  EXPECT_EQ(publicationDateKey("yesterday"), 0u);
+  EXPECT_EQ(publicationDateKey(""), 0u);
+}
+
+TEST(LibrarySort, SeriesPositionsUseTheirDeclaredConvention) {
+  EXPECT_LT(compareSeriesPosition("2", true, "10", true), 0);
+  EXPECT_LT(compareSeriesPosition("2.25", true, "2.5", true), 0);
+  EXPECT_LT(compareSeriesPosition("2.2.1", false, "2.10", false), 0);
+  EXPECT_LT(compareSeriesPosition("1", true, "2", false), 0);
+  EXPECT_EQ(compareSeriesPosition("2", true, "2.0", false), 0);
+  EXPECT_EQ(compareSeriesPosition("2.5e1", true, "25", false), 0);
+  EXPECT_LT(compareSeriesPosition("2", false, "", true), 0);
+  EXPECT_EQ(compareSeriesPosition("nan", true, "bad", false), 0);
+}
+
+TEST(LibrarySort, MixedSeriesOrderingIsTransitive) {
+  struct Position {
+    const char* text;
+    bool calibre;
+  };
+  const Position positions[] = {{"2", true},    {"2.0", false}, {"2.10", false}, {"2.2", true}, {"2.1.1", false},
+                                {"-1.5", true}, {"", false},    {"bad", true},   {"2.05", true}};
+  for (const auto& a : positions)
+    for (const auto& b : positions)
+      for (const auto& c : positions) {
+        if (compareSeriesPosition(a.text, a.calibre, b.text, b.calibre) <= 0 &&
+            compareSeriesPosition(b.text, b.calibre, c.text, c.calibre) <= 0) {
+          EXPECT_LE(compareSeriesPosition(a.text, a.calibre, c.text, c.calibre), 0);
+        }
+      }
+}
+
 namespace {
 
 // A header for N books whose sections are laid out consistently, i.e. one that
@@ -56,8 +104,8 @@ TEST(LibraryFormat, SectionsDoNotOverlap) {
   EXPECT_GE(h.folderStart, sizeof(ClixHeader));
   EXPECT_GE(h.recordStart, h.folderStart + h.folderLen);
   EXPECT_GE(h.permStart, h.recordStart + 200u * sizeof(ClixRecord));
-  EXPECT_GE(h.nameStart, h.permStart + 200u * 2u * sizeof(uint16_t));
-  EXPECT_EQ(h.selfSize, h.nameStart + h.nameLen);
+  EXPECT_GE(h.nameStart, h.permStart + 200u * 7u * sizeof(uint16_t));
+  EXPECT_EQ(h.selfSize, h.metadataStart + h.bookCount * sizeof(CachedMetadata));
 }
 
 TEST(LibraryFormat, RecordOffsetsAreAlignedAndOrdered) {
@@ -79,7 +127,7 @@ TEST(LibraryFormat, PermutationArraysDoNotOverlapEachOther) {
 
 TEST(LibraryFormat, SizeArithmeticMatchesTheSpecTable) {
   // Spec section 3.7, the 200-book row: 512 header + 1536 folders + 25600
-  // records + 1024 permutations + 16000 names.
+  // records + 3072 permutations + 16000 names.
   ClixHeader h{};
   memcpy(h.magic, CLIX_MAGIC, sizeof(CLIX_MAGIC));
   h.formatVersion = CLIX_FORMAT_VERSION;
@@ -89,7 +137,8 @@ TEST(LibraryFormat, SizeArithmeticMatchesTheSpecTable) {
   EXPECT_EQ(h.folderStart, 512u);
   EXPECT_EQ(h.recordStart, 2048u);
   EXPECT_EQ(h.permStart, 2048u + 25600u);
-  EXPECT_EQ(h.selfSize, 44672u);
+  EXPECT_EQ(h.metadataStart, alignUp(46720u));
+  EXPECT_EQ(h.selfSize, h.metadataStart + 200u * sizeof(CachedMetadata));
 }
 
 TEST(LibraryFormatValidation, AcceptsAWellFormedHeader) {

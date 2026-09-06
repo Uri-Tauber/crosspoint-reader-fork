@@ -1,24 +1,7 @@
 #pragma once
 
-// Builds the CLX1 index by walking the SD card once.
-//
-// M1 derives everything from paths and filenames; reading titles and authors out
-// of the EPUBs themselves is M2 (LibraryEnrich), which rewrites records in place
-// and never re-walks.
-//
-// Shape of the build, and why:
-//
-//   * ONE walk. Records go straight into a staging file in discovery order, so
-//     nothing proportional to the library stays resident. Only a small sort array
-//     does, and it is capped.
-//   * Duplicate directory entries are dropped. A damaged FAT can hand the same
-//     file out twice — measured on a real card: 6 of 75 entries were duplicate
-//     dirents resolving to one inode — and without this the shelf shows phantom
-//     books that cannot be opened.
-//   * Unreadable entries are skipped, never fatal. The same card had 7 entries
-//     whose names enumerate but whose contents cannot be opened.
-//   * Install is write-then-rename, so an interrupted build leaves the previous
-//     index untouched rather than a half-written one.
+// Builds the SD library index with bounded scratch and transactional installation.
+// Fresh records reuse source metadata. Only selected extended orders are prepared.
 
 #include <cstdint>
 #include <string>
@@ -50,6 +33,16 @@ struct BuildStats {
   uint16_t duplicatesDropped = 0;
   uint16_t unreadableSkipped = 0;
   uint32_t walkMs = 0;
+  uint32_t sortMs = 0;
+  uint32_t totalMs = 0;
+  uint64_t sdReadBytes = 0;
+  uint64_t sdWrittenBytes = 0;
+  uint32_t minimumFreeHeap = 0;  // low-water mark since boot
+  uint16_t parsed = 0;
+  uint16_t metadataReused = 0;
+  uint16_t preparedSorts = 0;
+  uint16_t sortPasses = 0;
+  bool indexReplaced = false;
   // Reconciliation against the previous index. Their sum over a rebuild with no
   // card changes should be: unchanged == books, everything else zero.
   uint16_t unchanged = 0;  // same (name, size): keeps its place in "Recently added"
@@ -61,15 +54,11 @@ struct BuildStats {
   bool dedupDegraded = false;
 };
 
-// Walk `rootPath`, write `/.crosspoint/library.idx`, and report what happened.
-// The previous index, including its monotonic "recently added" counter, is read
-// internally so callers cannot accidentally split one rebuild state across two
-// file opens.
-// `readMetadata` makes the walk prefer the title and author held inside each
-// book over its filename. It reads an existing cache when available; otherwise
-// it stops the normal EPUB parser at the end of <metadata>, before the manifest,
-// without building the reader's spine, TOC, CSS, or section caches.
-bool buildLibraryIndex(const char* rootPath, BuildStats& stats, bool readMetadata = false);
+// Walk once, preserving arrival history separately from metadata freshness.
+// forceRefresh bypasses the source cache, but never overrides readMetadata=false.
+bool buildLibraryIndex(const char* rootPath, BuildStats& stats, bool readMetadata = false,
+                       uint16_t requestedSorts = DEFAULT_SORTS, bool forceRefresh = false);
+bool prepareLibraryOrders(uint16_t requestedSorts, BuildStats& stats);
 
 // Live index path, shared by the builder and activity.
 const char* libraryIndexPath();

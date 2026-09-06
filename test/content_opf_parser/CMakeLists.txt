@@ -3,6 +3,7 @@ find_package(EXPAT REQUIRED)
 add_executable(ContentOpfParserTest
   ContentOpfParserTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ContentOpfParser.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/LibraryMetadata.cpp
 )
 
 target_include_directories(ContentOpfParserTest PRIVATE

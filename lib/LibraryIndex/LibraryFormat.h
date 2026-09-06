@@ -11,8 +11,9 @@
 //   header        64 bytes of struct, padded to 512
 //   folders       F variable-length records; the id of a folder IS its ordinal
 //   records       N x exactly 128 bytes, in folded-title order
-//   permutations  authorOrder[N] then arrivalOrder[N], both u16
+//   permutations  author, arrival, date, publisher, language, series, subject (u16)
 //   names         raw display basenames, no NULs, lengths held in the records
+//   metadata      fixed source/freshness/key cache, indexed by core ordinal
 //
 // The fixed 128-byte record stride is the load-bearing choice: record k lives at
 // recordStart + 128k, so paging is O(1) in every sort order with no offset
@@ -23,22 +24,24 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "LibrarySort.h"
+
 namespace library {
 
 inline constexpr char CLIX_MAGIC[4] = {'C', 'L', 'X', '1'};
 // Bumping this is the whole migration: an index from an older version fails
-// validation and is rebuilt. This format first lands from this branch as v1.
-inline constexpr uint8_t CLIX_FORMAT_VERSION = 1;
+// validation and is rebuilt. No previous development format is accepted.
+inline constexpr uint8_t CLIX_FORMAT_VERSION = 3;
 
 // Bump when the fold or the article table changes. Forces fold and ranks to be
-// rebuilt while firstSeen values are preserved, so "recently added" survives.
+// rebuilt. Stale development indexes do not preserve arrival history.
 inline constexpr uint8_t CLIX_FOLD_VERSION = 2;
 
 inline constexpr uint32_t CLIX_ALIGN = 512;
 inline constexpr size_t CLIX_FOLD_BYTES = 96;
 inline constexpr size_t CLIX_AUTHOR_KEY_BYTES = 12;
 
-// A 2000-book card already produces a 429 KiB index. This hard bound keeps every
+// This hard bound keeps every
 // record count and permutation ordinal representable by uint16_t.
 inline constexpr uint16_t CLIX_MAX_RECORDS = 4096;
 
@@ -68,7 +71,10 @@ struct ClixHeader {
   // Expected total file size. Comparing it with the real size is a free
   // truncation guard: a build interrupted by a power cut cannot pass.
   uint32_t selfSize;
-  uint8_t reserved[20];
+  uint32_t metadataStart;
+  uint16_t preparedSorts;
+  uint8_t metadataEnabled;
+  uint8_t reserved[13];
 };
 static_assert(sizeof(ClixHeader) == 64, "ClixHeader must be exactly 64 bytes");
 
@@ -95,6 +101,28 @@ static_assert(sizeof(ClixFolderHeader) == 1, "ClixFolderHeader must be 1 byte");
 
 #pragma pack(pop)
 
+inline constexpr uint8_t METADATA_EXTRACTION_VERSION = 1;
+inline constexpr uint8_t NORMALIZATION_VERSION = 1;
+inline constexpr size_t SORT_TEXT_BYTES = 384;
+struct CachedMetadata {
+  uint32_t modificationTime = 0;
+  uint8_t extractionVersion = 0;
+  uint8_t normalizationVersion = 0;
+  uint8_t extracted = 0;
+  uint8_t titleFromBook = 0;
+  char originalAuthor[129]{};
+  char title[256]{};
+  char values[METADATA_SORT_COUNT][128]{};
+  char seriesIndex[32]{};
+  uint8_t calibreIndex = 0;
+  char normalized[METADATA_SORT_COUNT][SORT_TEXT_BYTES]{};
+  uint32_t dateKey = 0;
+  SeriesPositionKey seriesKey;
+};
+
+static_assert(sizeof(CachedMetadata) == 3048);
+static_assert(offsetof(CachedMetadata, seriesKey) == 2992);
+
 inline uint32_t alignUp(const uint32_t value) { return (value + CLIX_ALIGN - 1) / CLIX_ALIGN * CLIX_ALIGN; }
 
 // Fill in every offset and the expected file size from the counts alone, so the
@@ -104,9 +132,11 @@ inline void layoutSections(ClixHeader& h, const uint32_t folderBytes, const uint
   h.folderLen = folderBytes;
   h.recordStart = alignUp(h.folderStart + folderBytes);
   h.permStart = alignUp(h.recordStart + static_cast<uint32_t>(h.bookCount) * sizeof(ClixRecord));
-  h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) * 2u * sizeof(uint16_t));
+  const unsigned permutations = 2u + METADATA_SORT_COUNT;
+  h.nameStart = alignUp(h.permStart + static_cast<uint32_t>(h.bookCount) * permutations * sizeof(uint16_t));
   h.nameLen = nameBytes;
-  h.selfSize = h.nameStart + nameBytes;
+  h.metadataStart = alignUp(h.nameStart + nameBytes);
+  h.selfSize = h.metadataStart + static_cast<uint32_t>(h.bookCount) * sizeof(CachedMetadata);
 }
 
 inline uint32_t recordOffset(const ClixHeader& h, const uint16_t ordinal) {
@@ -117,6 +147,9 @@ inline uint32_t authorOrderOffset(const ClixHeader& h, const uint16_t k) {
 }
 inline uint32_t arrivalOrderOffset(const ClixHeader& h, const uint16_t k) {
   return h.permStart + (static_cast<uint32_t>(h.bookCount) + k) * sizeof(uint16_t);
+}
+inline uint32_t metadataOrderOffset(const ClixHeader& h, SortKind kind, uint16_t k) {
+  return h.permStart + (static_cast<uint32_t>(h.bookCount) * (static_cast<uint8_t>(kind) - 1u) + k) * sizeof(uint16_t);
 }
 
 // Why a loaded index was rejected. Reported rather than swallowed so a rebuild
@@ -146,12 +179,15 @@ inline ClixValidity validateHeaderStructure(const ClixHeader& h, const uint64_t 
   // Both lengths are attacker-controlled bytes. Capped against the real file
   // size they cannot wrap the 32-bit section sums below, so the layout
   // comparison stays sound instead of re-deriving the same wrapped values.
-  if (h.folderLen > actualFileSize || h.nameLen > actualFileSize) return ClixValidity::SectionsInconsistent;
+  if (h.folderLen > 256u * CLIX_MAX_RECORDS || h.nameLen > 2048u * CLIX_MAX_RECORDS || h.folderLen > actualFileSize ||
+      h.nameLen > actualFileSize)
+    return ClixValidity::SectionsInconsistent;
 
   ClixHeader expected = h;
   layoutSections(expected, h.folderLen, h.nameLen);
   if (expected.folderStart != h.folderStart || expected.recordStart != h.recordStart ||
-      expected.permStart != h.permStart || expected.nameStart != h.nameStart || expected.selfSize != h.selfSize) {
+      expected.permStart != h.permStart || expected.nameStart != h.nameStart ||
+      expected.metadataStart != h.metadataStart || expected.selfSize != h.selfSize) {
     return ClixValidity::SectionsInconsistent;
   }
   return ClixValidity::Ok;
