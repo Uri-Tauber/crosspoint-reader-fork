@@ -16,12 +16,6 @@ namespace library {
 // and an uncapped walk would never return.
 inline constexpr int LIBRARY_MAX_DEPTH = 5;
 
-// Books held in the in-RAM sort array. 14 bytes each, so this is 7 KB — one
-// bounded allocation, in the band the codebase allows without a heap gate.
-// Beyond it the index is still built and still complete, but in walk order with
-// CLIX_FLAG_RANKS_DEGRADED set, which the screen reports rather than hides.
-inline constexpr uint16_t LIBRARY_MAX_SORTED = 512;
-
 // Duplicate identities remembered while one directory is enumerated. The
 // fixed, fallible allocation is 8 KiB at this cap; unlike std::vector it cannot
 // grow into abort() when a damaged or unusually flat directory is scanned.
@@ -50,7 +44,6 @@ struct BuildStats {
   uint16_t renamed = 0;    // matched a leftover entry by size alone
   uint16_t removed = 0;    // previous entry no book claimed
   uint16_t enriched = 0;   // took its title or author from the book rather than the filename
-  bool ranksDegraded = false;
   bool dedupDegraded = false;
 };
 

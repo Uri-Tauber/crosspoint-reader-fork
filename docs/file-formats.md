@@ -437,12 +437,6 @@ The filename must stay first and stay the filename: `readPath` rebuilds a book's
 path from it, so writing the display title there makes the book impossible to open.
 That was a real defect, and it is why title has its own field.
 
-### Header flags
-
-`RANKS_DEGRADED` says one or more sort orders fell back to discovery/title order, which
-happens past `LIBRARY_MAX_SORTED` books, where the sort arrays would not fit in
-RAM.
-
 Extended values are capped at 127 UTF-8 bytes. Empty values sort last ascending
 and first descending; equal values retain title order. Publication dates accept
 `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` with an optional ISO time suffix; invalid
@@ -493,10 +487,11 @@ Rename matching preserves arrival history only.
 An unchanged rebuild retains the index and all prepared orders without sorting.
 After book changes, only selected extended orders remain prepared.
 
-The extended sorter uses one fallible 6 KiB workspace.
+The sorter uses one fallible 6 KiB workspace for core and extended orders.
 It sorts eight keys at a time, then merges runs through buffered sequential reads.
-Comparators use cached keys and perform no file I/O.
-The 512-book sorting limit remains in effect.
+Title and author use 12-byte keys, and arrival uses a two-byte key. Extended
+fields use their cached metadata keys. Comparators perform no file I/O.
+The same bounded sorter handles every order up to the 4096-book format limit.
 Allocation and I/O failures retain the previous usable index.
 Installation uses the current-format `.new` and `.bak` recovery transaction.
 

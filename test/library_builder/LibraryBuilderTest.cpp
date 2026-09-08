@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <numeric>
 #include <random>
+#include <string>
+#include <vector>
 
 #include "Epub.h"
 #include "LibraryBuilder.h"
@@ -12,6 +15,29 @@
 using namespace library;
 namespace {
 constexpr char INDEX[] = "/.crosspoint/library.idx";
+
+struct ExpectedBook {
+  std::string path;
+  std::string title;
+  std::string author;
+  std::string series;
+};
+
+std::string numbered(const char* prefix, unsigned value) {
+  char text[32];
+  snprintf(text, sizeof(text), "%s%04u", prefix, value);
+  return text;
+}
+
+std::string pathAt(LibraryIndexFile& index, SortOrder order, uint16_t row) {
+  const uint16_t ordinal = index.ordinalForRow(order, row);
+  if (ordinal == 0xffff) return {};
+  ClixRecord record{};
+  if (!index.readRecord(ordinal, record)) return {};
+  std::string path;
+  return index.readPath(record, path) ? path : std::string();
+}
+
 class LibraryBuilderTest : public ::testing::Test {
  protected:
   BuildStats stats;
@@ -192,29 +218,30 @@ TEST_F(LibraryBuilderTest, PreparationReadAndWriteFailuresRetainIndex) {
 TEST(LibraryBufferedSorter, MatchesReferenceAcrossBatchAndMergeBoundaries) {
   fake::reset();
   std::mt19937 random(77);
-  for (unsigned count : {0, 1, 7, 8, 9, 17, 127, 512}) {
+  for (unsigned count : {0, 1, 7, 8, 9, 17, 127, 512, 4096}) {
     std::vector<BufferedSortKey> keys(count);
     for (unsigned i = 0; i < count; ++i) {
       auto& key = keys[i];
       snprintf(key.text, sizeof(key.text), "%s", i % 9 ? (i % 3 ? "alpha" : "beta") : "");
       key.date = i % 7 ? random() % 200 : 0;
       key.series = seriesPositionKey(std::to_string(random() % 17).c_str(), true);
-      key.ordinal = i;
     }
     auto workspace = std::make_unique<SortWorkspace>();
     for (uint8_t field = 0; field < METADATA_SORT_COUNT; ++field) {
       std::vector<uint16_t> actual(count), expected(count);
       std::iota(expected.begin(), expected.end(), 0);
-      std::stable_sort(expected.begin(), expected.end(),
-                       [&](auto a, auto b) { return sortKeyBefore(keys[a], keys[b], field); });
+      std::stable_sort(expected.begin(), expected.end(), [&](auto a, auto b) {
+        const int compared = compareMetadataSortKeys(&keys[a], &keys[b], field);
+        return compared < 0 || (compared == 0 && a < b);
+      });
       uint16_t passes = 0;
       ASSERT_TRUE(bufferedSort(
-          count, field,
-          [](void* ctx, uint16_t ordinal, uint8_t, BufferedSortKey& out) {
-            out = (*static_cast<std::vector<BufferedSortKey>*>(ctx))[ordinal];
+          count, field, sizeof(BufferedSortKey),
+          [](void* ctx, uint16_t ordinal, uint8_t, void* output) {
+            *static_cast<BufferedSortKey*>(output) = (*static_cast<std::vector<BufferedSortKey>*>(ctx))[ordinal];
             return true;
           },
-          &keys, *workspace, actual.data(), passes));
+          compareMetadataSortKeys, &keys, *workspace, actual.data(), passes));
       EXPECT_EQ(actual, expected) << count << ":" << unsigned(field);
     }
   }
@@ -258,7 +285,7 @@ TEST_F(LibraryBuilderTest, CachedDisplayAndOpeningReadOnlyRequestedData) {
   EXPECT_FALSE(index.hasOrders(1u << 6));
   EXPECT_EQ(index.ordinalForRow(SortOrder::SeriesAsc, 0), 0xffff);
 }
-TEST_F(LibraryBuilderTest, SortLimitAndEmptyLibraryRemainUsable) {
+TEST_F(LibraryBuilderTest, EmptyLibraryRemainsUsable) {
   fake::files.clear();
   fake::add("/", "");
   fake::files["/"]->directory = true;
@@ -266,11 +293,96 @@ TEST_F(LibraryBuilderTest, SortLimitAndEmptyLibraryRemainUsable) {
   EXPECT_EQ(stats.books, 0);
   ASSERT_TRUE(buildLibraryIndex("/", stats, false));
   EXPECT_FALSE(stats.indexReplaced);
-  for (unsigned i = 0; i < 513; ++i) fake::add("/" + std::to_string(i) + ".txt");
-  ASSERT_TRUE(buildLibraryIndex("/", stats, false, 1u << 6));
-  EXPECT_EQ(stats.books, 513);
-  EXPECT_TRUE(stats.ranksDegraded);
-  EXPECT_EQ(stats.sortPasses, 0);
+}
+
+TEST_F(LibraryBuilderTest, OldSortBoundaryKeepsCoreAndExtendedOrdersCorrect) {
+  fake::files.clear();
+  std::vector<ExpectedBook> books;
+  books.reserve(513);
+  for (unsigned i = 0; i < 512; ++i) {
+    ExpectedBook book{"/book" + numbered("", i) + ".epub", numbered("Title ", 511 - i),
+                      numbered("Given S", (i * 257) % 512), numbered("Series ", (i * 37) % 512)};
+    fake::add(book.path);
+    auto& metadata = bookMetadata[book.path];
+    metadata.title = book.title;
+    metadata.author = book.author;
+    metadata.series = book.series;
+    books.push_back(std::move(book));
+  }
+
+  constexpr uint16_t sorts = DEFAULT_SORTS | (1u << static_cast<unsigned>(SortKind::Series));
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true, sorts));
+
+  ExpectedBook added{"/000-new.epub", "Title 0256a", "Given S0256a", "Series 0256a"};
+  fake::add(added.path);
+  auto& metadata = bookMetadata[added.path];
+  metadata.title = added.title;
+  metadata.author = added.author;
+  metadata.series = added.series;
+  books.push_back(added);
+
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true, sorts));
+  ASSERT_EQ(stats.books, 513);
+  EXPECT_GT(stats.sortPasses, 0);
+
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  EXPECT_TRUE(index.hasOrders(sorts));
+
+  std::vector<std::string> expectedAdded;
+  expectedAdded.reserve(books.size());
+  for (const auto& book : books) expectedAdded.push_back(book.path);
+
+  const auto expectSorted = [&](SortOrder order, auto member) {
+    auto expected = books;
+    std::stable_sort(expected.begin(), expected.end(),
+                     [member](const auto& a, const auto& b) { return a.*member < b.*member; });
+    for (uint16_t row = 0; row < expected.size(); ++row) {
+      EXPECT_EQ(pathAt(index, order, row), expected[row].path) << row;
+    }
+  };
+
+  for (uint16_t row = 0; row < expectedAdded.size(); ++row) {
+    EXPECT_EQ(pathAt(index, SortOrder::AddedAsc, row), expectedAdded[row]) << row;
+  }
+  expectSorted(SortOrder::TitleAsc, &ExpectedBook::title);
+  expectSorted(SortOrder::AuthorAsc, &ExpectedBook::author);
+  expectSorted(SortOrder::SeriesAsc, &ExpectedBook::series);
+}
+
+TEST_F(LibraryBuilderTest, MaximumLibraryKeepsCoreOrdersCorrect) {
+  fake::files.clear();
+  std::vector<ExpectedBook> books;
+  books.reserve(CLIX_MAX_RECORDS);
+  for (unsigned i = 0; i < CLIX_MAX_RECORDS; ++i) {
+    ExpectedBook book{"/scan" + numbered("", i) + ".epub",
+                      numbered("Title ", CLIX_MAX_RECORDS - 1 - i),
+                      numbered("Given S", (i * 2053) % CLIX_MAX_RECORDS),
+                      {}};
+    fake::add(book.path);
+    auto& metadata = bookMetadata[book.path];
+    metadata.title = book.title;
+    metadata.author = book.author;
+    books.push_back(std::move(book));
+  }
+
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true));
+  ASSERT_EQ(stats.books, CLIX_MAX_RECORDS);
+  EXPECT_GT(stats.sortPasses, 0);
+
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  EXPECT_TRUE(index.hasOrders(DEFAULT_SORTS));
+
+  for (uint16_t row = 0; row < books.size(); ++row) {
+    EXPECT_EQ(pathAt(index, SortOrder::AddedAsc, row), books[row].path) << row;
+    EXPECT_EQ(pathAt(index, SortOrder::TitleAsc, row), books[books.size() - 1 - row].path) << row;
+  }
+
+  std::stable_sort(books.begin(), books.end(), [](const auto& a, const auto& b) { return a.author < b.author; });
+  for (uint16_t row = 0; row < books.size(); ++row) {
+    EXPECT_EQ(pathAt(index, SortOrder::AuthorAsc, row), books[row].path) << row;
+  }
 }
 
 TEST_F(LibraryBuilderTest, WriteCloseFailureRetainsIndex) {

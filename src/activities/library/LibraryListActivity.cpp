@@ -77,7 +77,6 @@ void LibraryListActivity::onEnter() {
       sortOrder = library::sortOrder(fallback, fallback == library::SortKind::Added);
     }
   }
-  degraded = index.isOpen() && index.ranksDegraded();
   if (index.isOpen() && index.dedupDegraded()) {
     LOG_ERR("LIB", "index was built without duplicate detection");
   }
@@ -176,7 +175,7 @@ void LibraryListActivity::openSearch() {
     query = std::get<KeyboardResult>(result.data).text;
     applyFilter();
     auto& nav = activeNav();
-    if (!query.empty() && filteredCount == 0 && !degraded) {
+    if (!query.empty() && filteredCount == 0) {
       // The tab band remains focusable when there is no
       // row. ScreenLeft then follows the OPDS header
       // action pattern and reopens Search.
@@ -252,8 +251,7 @@ int LibraryListActivity::rowFor(const int entry) const {
 }
 
 bool LibraryListActivity::groupable() const {
-  return !degraded && (isValueSort(sortOrder) || library::sortKind(sortOrder) == library::SortKind::Title) &&
-         bookRowCount() > 0;
+  return (isValueSort(sortOrder) || library::sortKind(sortOrder) == library::SortKind::Title) && bookRowCount() > 0;
 }
 
 uint32_t LibraryListActivity::titleInitialFor(const int entry) {
@@ -429,7 +427,7 @@ bool LibraryListActivity::handleButtons() {
 
   if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, LONG_PRESS_MS)) {
     if (tabsFocused()) {
-      if (!degraded) openSearch();
+      openSearch();
     } else if (!groupsCollapsed && groupable()) {
       collapseGroups(selectedEntry());
     } else {
@@ -450,7 +448,7 @@ bool LibraryListActivity::handleButtons() {
       nav.selected = bookRowCount() > 0 ? 1 : 0;
       nav.top = 0;
       requestUpdate();
-    } else if (!tabsFocused() && !degraded) {
+    } else if (!tabsFocused()) {
       // The sort bar is a separate control mode. Preserve the viewport so a
       // short Confirm can return to the same page.
       nav.selected = 0;
@@ -475,7 +473,6 @@ bool LibraryListActivity::handleButtons() {
 
 void LibraryListActivity::navigateButtons() {
   if (tabsFocused()) {
-    if (degraded) return;
     buttonNavigator.onRelease({MappedInputManager::Button::ScreenDown}, [this] {
       const int count = listCount();
       if (count <= 0) return;
@@ -606,7 +603,7 @@ void LibraryListActivity::buildHeader(UiScreen& screen) {
   fui::HeaderProps header;
   header.title = headerTitle();
   header.borderEdges = fui::EdgeBottom;
-  if (!groupsCollapsed && !degraded) {
+  if (!groupsCollapsed) {
     header.trailingIcon = fui::bitmapFromIcon(icon_search_32);
     header.trailingAction = ACTION_SEARCH;
     const int titleFontId = uiScaleSpec().titleFontId;
@@ -626,7 +623,7 @@ void LibraryListActivity::buildScreen(UiScreen& screen) {
                                       static_cast<int16_t>(metrics.buttonHintsHeight + readoutReserved), 0});
   buildHeader(screen);
 
-  if (!degraded) buildTabBar(screen);
+  buildTabBar(screen);
   if (bookRowCount() == 0) {
     const char* message = tr(STR_LIBRARY_NO_RESULTS);
     if (filterFailed) {
@@ -660,14 +657,12 @@ void LibraryListActivity::drawPositionReadout() const {
   renderer.drawText(SMALL_FONT_ID, x, y, buf, true);
 }
 
-const char* LibraryListActivity::headerTitle() const {
-  return degraded ? tr(STR_LIBRARY_TITLE_UNSORTED) : tr(STR_LIBRARY);
-}
+const char* LibraryListActivity::headerTitle() const { return tr(STR_LIBRARY); }
 
 void LibraryListActivity::drawHoldHelp() const {
   if (mappedInput.hasTouch() || groupsCollapsed) return;
   const char* help = nullptr;
-  if (tabsFocused() && !degraded)
+  if (tabsFocused())
     help = tr(STR_LIBRARY_HOLD_SEARCH);
   else if (groupable())
     help = tr(STR_LIBRARY_HOLD_GROUPS);

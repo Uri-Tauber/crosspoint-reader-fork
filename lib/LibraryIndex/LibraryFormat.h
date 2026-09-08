@@ -31,7 +31,7 @@ namespace library {
 inline constexpr char CLIX_MAGIC[4] = {'C', 'L', 'X', '1'};
 // Bumping this is the whole migration: an index from an older version fails
 // validation and is rebuilt. No previous development format is accepted.
-inline constexpr uint8_t CLIX_FORMAT_VERSION = 3;
+inline constexpr uint8_t CLIX_FORMAT_VERSION = 4;
 
 // Bump when the fold or the article table changes. Forces fold and ranks to be
 // rebuilt. Stale development indexes do not preserve arrival history.
@@ -46,8 +46,7 @@ inline constexpr size_t CLIX_AUTHOR_KEY_BYTES = 12;
 inline constexpr uint16_t CLIX_MAX_RECORDS = 4096;
 
 enum ClixFlags : uint8_t {
-  CLIX_FLAG_RANKS_DEGRADED = 1 << 0,
-  CLIX_FLAG_DEDUP_DEGRADED = 1 << 1,
+  CLIX_FLAG_DEDUP_DEGRADED = 1 << 0,
 };
 
 #pragma pack(push, 1)

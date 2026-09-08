@@ -35,7 +35,6 @@ class LibraryIndexFile {
   ClixValidity validity() const { return lastValidity; }
   const ClixHeader& header() const { return head; }
   uint16_t bookCount() const { return opened ? head.bookCount : 0; }
-  bool ranksDegraded() const { return opened && (head.flags & CLIX_FLAG_RANKS_DEGRADED) != 0; }
   bool dedupDegraded() const { return opened && (head.flags & CLIX_FLAG_DEDUP_DEGRADED) != 0; }
 
   // Record ordinal of the row at display position `row` in `order`. Returns

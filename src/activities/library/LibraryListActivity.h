@@ -104,10 +104,6 @@ class LibraryListActivity final : public UiTabListActivity {
   uint16_t enabledSorts = library::DEFAULT_SORTS;
   // One bit per tab; only Added starts descending.
   uint16_t descendingTabs = 1u;
-  // Set when the walk finished but the sort did not, so the screen can say the
-  // order is discovery order rather than silently showing a wrong one.
-  bool degraded = false;
-
   // Rows surviving the current query, as positions in the active sort order.
   // Empty query means no filtering and this owns no allocation, so the ordinary
   // shelf pays nothing proportional to the library for the feature.
@@ -116,8 +112,8 @@ class LibraryListActivity final : public UiTabListActivity {
   uint16_t filteredCount = 0;
   bool filterFailed = false;
 
-  // One start row per group. Grouping is only offered for the sorted <=512-book
-  // index, so this fallible allocation is at most 1 KiB and is reused after its
+  // One start row per group. This fallible allocation is at most 8 KiB at the
+  // format's 4096-book limit and is reused after its
   // first successful allocation.
   std::unique_ptr<uint16_t[]> groupStarts;
   uint16_t groupCapacity = 0;
