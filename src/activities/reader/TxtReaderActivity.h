@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Txt.h>
+#include <TxtPageIndex.h>
 
 #include <memory>
 #include <string>
@@ -15,7 +16,20 @@ class TxtReaderActivity final : public ReaderActivity {
   int currentPage = 0;
   int totalPages = 1;
 
-  // Streaming text reader - stores file offsets for each page
+  TxtPageIndex pageIndex;
+  std::unique_ptr<uint8_t[]> pageBuffer;
+  uint32_t nextIndexOffset = 0;
+  uint32_t pendingPage = 0;
+  uint32_t indexStartedMs = 0;
+  uint32_t openStartedMs = 0;
+  uint32_t maxSliceMs = 0;
+  uint32_t lastLoggedPageCount = 0;
+  bool fallbackIndex = false;
+  bool waitingForIndex = false;
+  bool indexingPopupShown = false;
+  bool firstPageLogged = false;
+
+  // Temporary blocking fallback for an allocation or incremental-index failure.
   std::vector<size_t> pageOffsets;
   std::vector<std::string> currentPageLines;
   int linesPerPage = 0;
@@ -35,7 +49,12 @@ class TxtReaderActivity final : public ReaderActivity {
   void initializeReader(GfxRenderer& renderer);
   bool loadPageAtOffset(const GfxRenderer& renderer, size_t offset, std::vector<std::string>& outLines,
                         size_t& nextOffset);
-  void buildPageIndex(GfxRenderer& renderer);
+  void buildPageIndexBlocking(GfxRenderer& renderer);
+  void buildIndexSlice(GfxRenderer& renderer);
+  void useBlockingFallback(GfxRenderer& renderer);
+  uint32_t knownPageCount() const;
+  bool indexComplete() const;
+  bool readPageOffset(uint32_t page, uint32_t& offset);
   bool loadPageIndexCache();
   void savePageIndexCache() const;
   void saveProgress() const;
@@ -47,11 +66,17 @@ class TxtReaderActivity final : public ReaderActivity {
   void renderBook() override;
 
  public:
+  static constexpr size_t PAGE_BUFFER_SIZE = 8 * 1024;
+  static constexpr uint32_t INDEX_SLICE_BUDGET_MS = 10;
+
   explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string bookPath,
                              bool allowFastInitialRefresh)
       : ReaderActivity("TxtReader", renderer, mappedInput, std::move(bookPath), allowFastInitialRefresh) {}
   ~TxtReaderActivity() override = default;
 
+  void onEnter() override;
+  void onExit() override;
+  void loop() override;
   bool pageTurn(bool isForward) override;
   bool skipPages(int amount) override;
   bool isAtEndOfBook() const override;

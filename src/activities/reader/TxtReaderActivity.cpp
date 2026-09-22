@@ -17,11 +17,27 @@
 #include "fontIds.h"
 
 namespace {
-constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
 constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
+constexpr uint32_t INDEX_LOG_INTERVAL = 1000;
 }  // namespace
+
+void TxtReaderActivity::onEnter() {
+  openStartedMs = millis();
+  pageBuffer = makeUniqueNoThrow<uint8_t[]>(PAGE_BUFFER_SIZE);
+  if (!pageBuffer) {
+    fallbackIndex = true;
+    LOG_ERR("TRS", "OOM: %u-byte TXT page buffer; using blocking index", static_cast<unsigned>(PAGE_BUFFER_SIZE));
+  }
+  ReaderActivity::onEnter();
+}
+
+void TxtReaderActivity::onExit() {
+  pageIndex.close();
+  pageBuffer.reset();
+  ReaderActivity::onExit();
+}
 
 bool TxtReaderActivity::loadBook() {
   txt = makeUniqueNoThrow<Txt>(bookPath, "/.crosspoint");
@@ -65,21 +81,49 @@ void TxtReaderActivity::initializeReader(GfxRenderer& renderer) {
 
   LOG_DBG("TRS", "Viewport: %dx%d, lines per page: %d", viewportWidth, viewportHeight, linesPerPage);
 
-  // Try to load cached page index first
-  if (!loadPageIndexCache()) {
-    // Cache not found, build page index
-    buildPageIndex(renderer);
-    // Save to cache for next time
-    savePageIndexCache();
+  if (txt->getFileSize() > UINT32_MAX) {
+    LOG_ERR("TRS", "TXT file exceeds the 32-bit page-index format");
+    fallbackIndex = true;
   }
 
-  // Load saved progress
-  loadProgress();
+  if (!fallbackIndex) {
+    const TxtIndexSpec spec{static_cast<uint32_t>(txt->getFileSize()),
+                            viewportWidth,
+                            linesPerPage,
+                            cachedFontId,
+                            cachedScreenMargin,
+                            cachedParagraphAlignment};
+    if (!pageIndex.openOrStart(txt->getCachePath().c_str(), spec)) {
+      LOG_ERR("TRS", "Incremental TXT index unavailable; using blocking index");
+      fallbackIndex = true;
+    } else if (pageIndex.isComplete()) {
+      totalPages = pageIndex.knownPageCount();
+      loadProgress();
+    } else {
+      totalPages = 0;
+      nextIndexOffset = 0;
+      indexStartedMs = millis();
+      if (txt->getFileSize() == 0 && !pageIndex.finish()) {
+        fallbackIndex = true;
+      }
+    }
+  }
+
+  if (fallbackIndex) useBlockingFallback(renderer);
 
   initialized = true;
 }
 
-void TxtReaderActivity::buildPageIndex(GfxRenderer& renderer) {
+void TxtReaderActivity::useBlockingFallback(GfxRenderer& renderer) {
+  pageIndex.close();
+  if (!loadPageIndexCache()) {
+    buildPageIndexBlocking(renderer);
+    savePageIndexCache();
+  }
+  loadProgress();
+}
+
+void TxtReaderActivity::buildPageIndexBlocking(GfxRenderer& renderer) {
   pageOffsets.clear();
   pageOffsets.push_back(0);  // First page starts at offset 0
 
@@ -121,6 +165,7 @@ void TxtReaderActivity::buildPageIndex(GfxRenderer& renderer) {
 bool TxtReaderActivity::loadPageAtOffset(const GfxRenderer& renderer, size_t offset, std::vector<std::string>& outLines,
                                          size_t& nextOffset) {
   outLines.clear();
+  outLines.reserve(linesPerPage);
   const size_t fileSize = txt->getFileSize();
 
   if (offset >= fileSize) {
@@ -128,15 +173,16 @@ bool TxtReaderActivity::loadPageAtOffset(const GfxRenderer& renderer, size_t off
   }
 
   // Read a chunk from file
-  size_t chunkSize = std::min(CHUNK_SIZE, fileSize - offset);
-  auto* buffer = static_cast<uint8_t*>(malloc(chunkSize + 1));
+  const size_t chunkSize = std::min(PAGE_BUFFER_SIZE - 1, fileSize - offset);
+  std::unique_ptr<uint8_t[]> temporaryBuffer;
+  if (!pageBuffer) temporaryBuffer = makeUniqueNoThrow<uint8_t[]>(PAGE_BUFFER_SIZE);
+  uint8_t* const buffer = pageBuffer ? pageBuffer.get() : temporaryBuffer.get();
   if (!buffer) {
-    LOG_ERR("TRS", "Failed to allocate %zu bytes", chunkSize);
+    LOG_ERR("TRS", "OOM: %u-byte TXT page buffer", static_cast<unsigned>(PAGE_BUFFER_SIZE));
     return false;
   }
 
   if (!txt->readContent(buffer, offset, chunkSize)) {
-    free(buffer);
     return false;
   }
   buffer[chunkSize] = '\0';
@@ -233,8 +279,106 @@ bool TxtReaderActivity::loadPageAtOffset(const GfxRenderer& renderer, size_t off
     nextOffset = fileSize;
   }
 
-  free(buffer);
   return !outLines.empty();
+}
+
+uint32_t TxtReaderActivity::knownPageCount() const {
+  return fallbackIndex ? static_cast<uint32_t>(pageOffsets.size()) : pageIndex.knownPageCount();
+}
+
+bool TxtReaderActivity::indexComplete() const { return fallbackIndex || pageIndex.isComplete(); }
+
+bool TxtReaderActivity::readPageOffset(const uint32_t page, uint32_t& offset) {
+  if (!fallbackIndex) return pageIndex.pageOffset(page, offset);
+  if (page >= pageOffsets.size() || pageOffsets[page] > UINT32_MAX) return false;
+  offset = static_cast<uint32_t>(pageOffsets[page]);
+  return true;
+}
+
+void TxtReaderActivity::buildIndexSlice(GfxRenderer& renderer) {
+  const auto resolvePendingPage = [this]() {
+    if (!waitingForIndex || !indexingPopupShown) return false;
+    const uint32_t availablePages = knownPageCount();
+    if (pendingPage < availablePages) {
+      currentPage = static_cast<int>(pendingPage);
+    } else if (indexComplete()) {
+      currentPage = static_cast<int>(availablePages);
+    } else {
+      return false;
+    }
+    waitingForIndex = false;
+    indexingPopupShown = false;
+    requestUpdate();
+    return true;
+  };
+
+  if (resolvePendingPage()) return;
+  if (indexComplete()) return;
+
+  const uint32_t sliceStartedMs = millis();
+  do {
+    size_t nextOffset = nextIndexOffset;
+    if (!loadPageAtOffset(renderer, nextIndexOffset, currentPageLines, nextOffset) || nextOffset <= nextIndexOffset) {
+      LOG_ERR("TRS", "Incremental TXT pagination failed at byte %u", static_cast<unsigned>(nextIndexOffset));
+      fallbackIndex = true;
+      useBlockingFallback(renderer);
+      requestUpdate();
+      return;
+    }
+
+    nextIndexOffset = static_cast<uint32_t>(nextOffset);
+    if (nextOffset >= txt->getFileSize()) {
+      const uint32_t sliceMs = millis() - sliceStartedMs;
+      if (sliceMs > maxSliceMs) maxSliceMs = sliceMs;
+      if (!pageIndex.finish()) {
+        fallbackIndex = true;
+        useBlockingFallback(renderer);
+      } else {
+        totalPages = static_cast<int>(pageIndex.knownPageCount());
+        const uint32_t elapsed = millis() - indexStartedMs;
+        LOG_DBG("TRS", "TXT index complete: %u pages, %lu ms, max slice %lu ms, heap %u, max block %u",
+                static_cast<unsigned>(pageIndex.knownPageCount()), static_cast<unsigned long>(elapsed),
+                static_cast<unsigned long>(maxSliceMs), static_cast<unsigned>(ESP.getFreeHeap()),
+                static_cast<unsigned>(ESP.getMaxAllocHeap()));
+      }
+      resolvePendingPage();
+      requestUpdate();
+      return;
+    }
+
+    if (!pageIndex.appendPageOffset(nextIndexOffset)) {
+      LOG_ERR("TRS", "Failed to append incremental TXT page offset");
+      fallbackIndex = true;
+      useBlockingFallback(renderer);
+      requestUpdate();
+      return;
+    }
+
+    const uint32_t pages = pageIndex.knownPageCount();
+    if (pages - lastLoggedPageCount >= INDEX_LOG_INTERVAL) {
+      lastLoggedPageCount = pages;
+      LOG_DBG("TRS", "TXT index: %u pages, heap %u, max block %u", static_cast<unsigned>(pages),
+              static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    }
+  } while (millis() - sliceStartedMs < INDEX_SLICE_BUDGET_MS);
+
+  const uint32_t sliceMs = millis() - sliceStartedMs;
+  if (sliceMs > maxSliceMs) {
+    maxSliceMs = sliceMs;
+    LOG_DBG("TRS", "TXT index max slice: %lu ms", static_cast<unsigned long>(maxSliceMs));
+  }
+  resolvePendingPage();
+}
+
+void TxtReaderActivity::loop() {
+  const bool inputPending = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() ||
+                            mappedInput.wasScreenTouchReleased() ||
+                            mappedInput.homeButtonAction() != HomeButtonAction::Ignore;
+  ReaderActivity::loop();
+
+  if (!initialized || (indexComplete() && !waitingForIndex) || inputPending || RenderLock::peek()) return;
+  RenderLock lock;
+  buildIndexSlice(renderer);
 }
 
 void TxtReaderActivity::renderBook() {
@@ -246,7 +390,14 @@ void TxtReaderActivity::renderBook() {
     initializeReader(renderer);
   }
 
-  if (pageOffsets.empty()) {
+  if (waitingForIndex) {
+    indexingPopupShown = true;
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    return;
+  }
+
+  const uint32_t availablePages = knownPageCount();
+  if (availablePages == 0) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_FILE), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
@@ -255,10 +406,14 @@ void TxtReaderActivity::renderBook() {
 
   // Bounds check
   if (currentPage < 0) currentPage = 0;
-  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  if (currentPage >= static_cast<int>(availablePages)) currentPage = static_cast<int>(availablePages) - 1;
 
   // Load current page content
-  size_t offset = pageOffsets[currentPage];
+  uint32_t offset = 0;
+  if (!readPageOffset(static_cast<uint32_t>(currentPage), offset)) {
+    LOG_ERR("TRS", "Failed to load offset for TXT page %d", currentPage);
+    return;
+  }
   size_t nextOffset;
   currentPageLines.clear();
   loadPageAtOffset(renderer, offset, currentPageLines, nextOffset);
@@ -268,6 +423,13 @@ void TxtReaderActivity::renderBook() {
 
   // Save progress
   saveProgress();
+
+  if (!firstPageLogged) {
+    firstPageLogged = true;
+    LOG_DBG("TRS", "TXT first page: %lu ms, indexed pages %u, heap %u, max block %u",
+            static_cast<unsigned long>(millis() - openStartedMs), static_cast<unsigned>(availablePages),
+            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  }
 }
 
 void TxtReaderActivity::renderPage(GfxRenderer& renderer) {
@@ -331,12 +493,14 @@ void TxtReaderActivity::renderPage(GfxRenderer& renderer) {
 }
 
 void TxtReaderActivity::renderStatusBar() const {
-  const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
+  const bool complete = indexComplete();
+  const int exactPageCount = complete ? static_cast<int>(knownPageCount()) : 0;
+  const float progress = exactPageCount > 0 ? (currentPage + 1) * 100.0f / exactPageCount : 0;
   std::string title;
   if (SETTINGS.statusBarSpec().showsTitle()) {
     title = txt->getTitle();
   }
-  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title);
+  GUI.drawStatusBar(renderer, progress, currentPage + 1, exactPageCount, title);
 }
 
 bool TxtReaderActivity::pageTurn(bool isForward) {
@@ -345,11 +509,27 @@ bool TxtReaderActivity::pageTurn(bool isForward) {
     return false;
   }
   if (isForward) {
-    if (currentPage < totalPages) {
+    const uint32_t availablePages = knownPageCount();
+    if (currentPage + 1 < static_cast<int>(availablePages)) {
       currentPage++;
       return true;
     }
+    if (indexComplete()) {
+      if (currentPage < static_cast<int>(availablePages)) {
+        currentPage++;
+        return true;
+      }
+      return false;
+    }
+    pendingPage = static_cast<uint32_t>(currentPage + 1);
+    waitingForIndex = true;
+    indexingPopupShown = false;
+    return true;
   } else {
+    if (waitingForIndex) {
+      waitingForIndex = false;
+      indexingPopupShown = false;
+    }
     if (currentPage > 0) {
       currentPage--;
       return true;
@@ -362,12 +542,20 @@ bool TxtReaderActivity::skipPages(int amount) {
   if (!initialized) {
     return false;
   }
+  if (amount < 0) {
+    waitingForIndex = false;
+    indexingPopupShown = false;
+  }
   int newPage = currentPage + amount;
   if (newPage < 0) newPage = 0;
-  // Clamp to totalPages, not totalPages - 1: pageTurn() lets currentPage reach
-  // totalPages and isAtEndOfBook() treats that as the end-of-book sentinel, so
-  // a forward skip must be able to reach it too.
-  if (newPage > totalPages) newPage = totalPages;
+  const int availablePages = static_cast<int>(knownPageCount());
+  if (!indexComplete() && newPage >= availablePages) {
+    pendingPage = static_cast<uint32_t>(newPage);
+    waitingForIndex = true;
+    indexingPopupShown = false;
+    return true;
+  }
+  if (newPage > availablePages) newPage = availablePages;
   if (newPage != currentPage) {
     currentPage = newPage;
     return true;
@@ -375,9 +563,14 @@ bool TxtReaderActivity::skipPages(int amount) {
   return false;
 }
 
-bool TxtReaderActivity::isAtEndOfBook() const { return initialized && currentPage >= totalPages; }
+bool TxtReaderActivity::isAtEndOfBook() const {
+  return initialized && indexComplete() && currentPage >= static_cast<int>(knownPageCount());
+}
 
-void TxtReaderActivity::onReturnFromEndOfBook() { currentPage = totalPages > 0 ? totalPages - 1 : 0; }
+void TxtReaderActivity::onReturnFromEndOfBook() {
+  const uint32_t pages = knownPageCount();
+  currentPage = pages > 0 ? static_cast<int>(pages) - 1 : 0;
+}
 
 void TxtReaderActivity::saveProgress() const {
   uint8_t data[4];
@@ -396,13 +589,14 @@ void TxtReaderActivity::loadProgress() {
     uint8_t data[4];
     if (f.read(data, 4) == 4) {
       currentPage = data[0] + (data[1] << 8);
-      if (currentPage >= totalPages) {
-        currentPage = totalPages - 1;
+      const int pages = static_cast<int>(knownPageCount());
+      if (currentPage >= pages) {
+        currentPage = pages - 1;
       }
       if (currentPage < 0) {
         currentPage = 0;
       }
-      LOG_DBG("TRS", "Loaded progress: page %d/%d", currentPage, totalPages);
+      LOG_DBG("TRS", "Loaded progress: page %d/%d", currentPage, pages);
     }
   }
 }
@@ -521,8 +715,9 @@ ScreenshotInfo TxtReaderActivity::getScreenshotInfo() const {
     snprintf(info.title, sizeof(info.title), "%s", t.c_str());
   }
   info.currentPage = currentPage + 1;
-  info.totalPages = totalPages;
-  info.progressPercent = totalPages > 0 ? static_cast<int>((currentPage + 1) * 100.0f / totalPages + 0.5f) : 0;
+  info.totalPages = indexComplete() ? static_cast<int>(knownPageCount()) : 0;
+  info.progressPercent =
+      info.totalPages > 0 ? static_cast<int>((currentPage + 1) * 100.0f / info.totalPages + 0.5f) : 0;
   if (info.progressPercent > 100) info.progressPercent = 100;
   return info;
 }

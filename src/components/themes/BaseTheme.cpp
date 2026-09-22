@@ -777,7 +777,11 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     // Draw the estimate marker separately so it can use the next UI font size.
     const bool showEstimate = pageCountEstimated && sb.showChapterPageCount;
 
-    if (sb.showBookProgressPercent && sb.showChapterPageCount) {
+    if (pageCount <= 0 && sb.showChapterPageCount) {
+      snprintf(progressStr, sizeof(progressStr), "%d/?", currentPage);
+    } else if (pageCount <= 0) {
+      snprintf(progressStr, sizeof(progressStr), "?");
+    } else if (sb.showBookProgressPercent && sb.showChapterPageCount) {
       snprintf(progressStr, sizeof(progressStr), "%d/%d  %.0f%%", currentPage, pageCount, bookProgress);
     } else if (sb.showBookProgressPercent) {
       snprintf(progressStr, sizeof(progressStr), "%.0f%%", bookProgress);
