@@ -8,6 +8,7 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/UiAppHelpers.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -111,6 +112,7 @@ void UiListActivity::navigateButtons() {
 }
 
 void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, const int selectionOffset) {
+  styleListToggles(props);
   props.partialTrailingRow = true;
   auto& n = activeNav();
   const int prevTop = n.top;

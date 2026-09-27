@@ -220,6 +220,12 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
   // than building a new items/values vector on every render.
   const int count = listCount();
   for (int i = 0; i < count; i++) {
+    rowItems_[i].toggle = tab_ == Tab::Style || (tab_ == Tab::Layout && i == static_cast<int>(LayoutRow::ParaSpacing));
+    if (rowItems_[i].toggle) {
+      rowItems_[i].toggleChecked = tab_ == Tab::Style ? styleValue(i) : SETTINGS.extraParagraphSpacing != 0;
+      rowItems_[i].value = nullptr;
+      continue;
+    }
     switch (tab_) {
       case Tab::Family:
         rowValues_[i] = (i == currentFamilyIndex_) ? tr(STR_SELECTED) : "";
@@ -229,9 +235,6 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         break;
       case Tab::Layout:
         rowValues_[i] = layoutValueText(i);
-        break;
-      case Tab::Style:
-        rowValues_[i] = styleValueText(i);
         break;
       default:
         break;
@@ -444,8 +447,6 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
       const uint8_t v = SETTINGS.lineSpacing;
       return v < std::size(LINE_SPACING_IDS) ? I18N.get(LINE_SPACING_IDS[v]) : I18N.get(StrId::STR_NORMAL);
     }
-    case LayoutRow::ParaSpacing:
-      return SETTINGS.extraParagraphSpacing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case LayoutRow::Alignment: {
       const uint8_t v = SETTINGS.paragraphAlignment;
       return v < std::size(ALIGNMENT_IDS) ? I18N.get(ALIGNMENT_IDS[v]) : I18N.get(StrId::STR_JUSTIFY);
@@ -487,19 +488,19 @@ void TextSettingsActivity::confirmStyleRow(int row) {
   requestUpdate();
 }
 
-std::string TextSettingsActivity::styleValueText(int row) const {
+bool TextSettingsActivity::styleValue(int row) const {
   switch (static_cast<StyleRow>(row)) {
     case StyleRow::FocusReading:
-      return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return SETTINGS.focusReadingEnabled != 0;
     case StyleRow::Hyphenation:
-      return SETTINGS.hyphenationEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return SETTINGS.hyphenationEnabled != 0;
     case StyleRow::EmbeddedStyle:
-      return SETTINGS.embeddedStyle ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return SETTINGS.embeddedStyle != 0;
     case StyleRow::AntiAliasing:
-      return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return SETTINGS.textAntiAliasing != 0;
 
     default:
-      return "";
+      return false;
   }
 }
 

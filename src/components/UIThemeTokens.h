@@ -19,6 +19,8 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   if (!BoardConfig::hasTouch()) tokens.listMinRowHeight = static_cast<int16_t>(metrics.listRowHeight);
   tokens.listRowGap = static_cast<int16_t>(metrics.listRowGap);
   tokens.listRowRadius = static_cast<uint8_t>(metrics.listRowRadius);
+  // DarkGray is the 50% checkerboard: a 1px rule stays visible on odd scanlines too.
+  if (BoardConfig::hasTouch()) tokens.listSeparator = fui::Paint::dither(fui::Color::DarkGray);
   tokens.listInset = static_cast<int16_t>(metrics.listInset);
   tokens.listSidePadding = static_cast<int16_t>(metrics.listSidePadding);
   tokens.listSelectionStyle = static_cast<fui::SelectionStyle>(metrics.listSelectionStyle);

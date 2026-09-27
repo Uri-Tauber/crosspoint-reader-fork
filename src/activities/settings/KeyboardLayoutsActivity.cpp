@@ -67,10 +67,12 @@ void KeyboardLayoutsActivity::buildScreen(UiScreen& screen) {
 
   for (int i = 0; i < keyboard_layouts::COUNT; ++i) {
     const uint8_t row = static_cast<uint8_t>(i);
+    rowItems[i].toggle = !isLocked(row);
+    rowItems[i].toggleChecked = (workingMask & keyboard_layouts::bitAt(row)) != 0;
     if (isLocked(row)) {
       rowItems[i].value = tr(STR_DEFAULT_VALUE);
     } else {
-      rowItems[i].value = (workingMask & keyboard_layouts::bitAt(row)) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      rowItems[i].value = nullptr;
     }
   }
 

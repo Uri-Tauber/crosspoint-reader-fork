@@ -550,6 +550,17 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
   // render.
   const auto& settings = *currentSettings;
   for (size_t i = 0; i < settings.size(); i++) {
+    const auto& setting = settings[i];
+    const auto labels = setting.enumLabels();
+    const bool onOffEnum = setting.type == SettingType::ENUM && labels.size() == 2 &&
+                           labels[0] == StrId::STR_STATE_OFF && labels[1] == StrId::STR_STATE_ON;
+    rowItems_[i].toggle =
+        (setting.type == SettingType::TOGGLE || onOffEnum) && (setting.valuePtr != nullptr || setting.valueGetter);
+    if (rowItems_[i].toggle) {
+      rowItems_[i].toggleChecked = setting.valuePtr ? SETTINGS.*setting.valuePtr != 0 : setting.valueGetter() != 0;
+      rowItems_[i].value = nullptr;
+      continue;
+    }
     rowValues_[i] = settingValueText(settings[i]);
     rowItems_[i].value = rowValues_[i].empty() ? nullptr : rowValues_[i].c_str();
   }

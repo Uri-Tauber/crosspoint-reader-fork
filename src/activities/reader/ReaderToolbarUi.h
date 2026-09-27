@@ -38,6 +38,9 @@ class ReaderToolbarUi : public UiAppHost {
     int selectedIndex = -1;  // row the buttons' cursor sits on; -1 = none shown
     std::function<std::string(int)> rowText;
     std::function<std::string(int)> rowValue;
+    // Optional switch state: -1 for an ordinary row, 0 off, 1 on.
+    int (*rowToggle)(void* ctx, int index) = nullptr;
+    void* rowToggleCtx = nullptr;
     // Tile row: the tool in focus (toolbar) / the open panel (panel). 0..2.
     int activeTool = 0;
     // Button boards keep the theme's denser list row height (as every other

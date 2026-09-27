@@ -146,7 +146,8 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
       rowValues_[i] =
           KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? tr(STR_FILENAME) : tr(STR_BINARY);
     } else if (i == 4) {
-      rowValues_[i] = KOREADER_STORE.getSendMetadata() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      rowItems_[i].toggle = true;
+      rowItems_[i].toggleChecked = KOREADER_STORE.getSendMetadata();
     } else if (i == 5) {
       rowValues_[i] =
           KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART ? tr(STR_SMART_SYNC) : tr(STR_ASK_EVERY_TIME);

@@ -2061,6 +2061,17 @@ void EpubReaderActivity::renderOverlay() {
   if (!epub || !section || !toolbarUi) return;
 
   ReaderToolbarUi::Model model;
+  model.rowToggleCtx = this;
+  model.rowToggle = [](void* ctx, int row) -> int {
+    const auto* self = static_cast<EpubReaderActivity*>(ctx);
+    if (self->overlay == Overlay::Text && row == 4) return SETTINGS.focusReadingEnabled != 0;
+    if (self->overlay == Overlay::More && row >= 0 && row < static_cast<int>(self->moreItems.size())) {
+      const auto action = self->moreItems[row].action;
+      if (action == EpubReaderMenuActivity::MenuAction::NIGHT_MODE) return SETTINGS.screenInverted != 0;
+      if (action == EpubReaderMenuActivity::MenuAction::FRONTLIGHT) return Frontlight.isOn();
+    }
+    return -1;
+  };
   // The toolbar's tool pill is the button-navigation cursor: tap-first (same
   // convention as the panel lists), it only shows once a button has moved it.
   // Panels override below: there the pill marks the open panel on every board.

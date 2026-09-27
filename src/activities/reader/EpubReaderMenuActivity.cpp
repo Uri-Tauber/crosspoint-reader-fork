@@ -178,9 +178,11 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
     } else if (action == MenuAction::AUTO_PAGE_TURN) {
       menuRowItems[i].value = pageTurnLabels[selectedPageTurnOption];
     } else if (action == MenuAction::NIGHT_MODE) {
-      menuRowItems[i].value = I18N.get(SETTINGS.screenInverted ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
+      menuRowItems[i].toggle = true;
+      menuRowItems[i].toggleChecked = SETTINGS.screenInverted != 0;
     } else if (action == MenuAction::FRONTLIGHT) {
-      menuRowItems[i].value = I18N.get(Frontlight.isOn() ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
+      menuRowItems[i].toggle = true;
+      menuRowItems[i].toggleChecked = Frontlight.isOn();
     }
   }
 

@@ -10,6 +10,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/UiAppHelpers.h"
 #include "components/icons/readerToolbarIcons.h"
 
 namespace fui = freeink::ui;
@@ -272,6 +273,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   listProps_.inputMask = fui::InputTouch;  // physical buttons stay with the reader
   listProps_.rowHeight = rowH;
   listProps_.rowGap = rowGap;
+  styleListToggles(listProps_);
   // The label column starts flush with the panel title (no list-side padding
   // on top of the sheet's own inset). Body-size text: small reads condensed
   // and the taller row doubles as the tap target.
@@ -295,9 +297,12 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   const int windowCount = std::min({nav_.visibleRows, count - nav_.top, kMaxWindow});
   for (int i = 0; i < windowCount; ++i) {
     const int index = nav_.top + i;
+    const int toggle = model_.rowToggle ? model_.rowToggle(model_.rowToggleCtx, index) : -1;
     windowLabels_[i] = model_.rowText ? model_.rowText(index) : std::string();
-    windowValues_[i] = model_.rowValue ? model_.rowValue(index) : std::string();
+    windowValues_[i] = toggle < 0 && model_.rowValue ? model_.rowValue(index) : std::string();
     fui::ListItem item;
+    item.toggle = toggle >= 0;
+    item.toggleChecked = toggle > 0;
     item.label = windowLabels_[i].c_str();
     item.value = windowValues_[i].empty() ? nullptr : windowValues_[i].c_str();
     item.actionValue = static_cast<int16_t>(index);

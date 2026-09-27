@@ -16,6 +16,14 @@
 // Shared glue for activities hosting a FreeInkApp: the font-bound render
 // target and the touch snapshot FreeInkApp routing consumes.
 
+inline void styleListToggles(freeink::ui::ListProps& props) {
+  props.toggleWidth = 50;
+  props.toggleHeight = 28;
+  props.toggleRadius = 14;
+  props.toggleKnobRadius = 10;
+  props.toggleKnobInset = 4;
+}
+
 // One app-wide ThemeTokens instance shared by every FreeInkApp via
 // setThemeRef, so per-app copies (~1.5KB each, and one per stacked activity)
 // aren't pure heap waste. Refreshed on every screen entry, so theme or font

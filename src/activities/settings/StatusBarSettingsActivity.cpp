@@ -204,6 +204,14 @@ void StatusBarSettingsActivity::buildScreen(UiScreen& screen) {
   // rowValues_ strings (no array growth) rather than building a new
   // items/values vector on every render.
   for (int i = 0; i < visibleItemCount; i++) {
+    rowItems_[i].toggle = i == ITEM_CHAPTER_PAGE_COUNT || i == ITEM_BOOK_PROGRESS_PERCENTAGE || i == ITEM_BATTERY;
+    if (rowItems_[i].toggle) {
+      rowItems_[i].toggleChecked = i == ITEM_CHAPTER_PAGE_COUNT         ? SETTINGS.statusBarChapterPageCount != 0
+                                   : i == ITEM_BOOK_PROGRESS_PERCENTAGE ? SETTINGS.statusBarBookProgressPercentage != 0
+                                                                        : SETTINGS.statusBarBattery != 0;
+      rowItems_[i].value = nullptr;
+      continue;
+    }
     rowValues_[i] = rowValueText(i);
     rowItems_[i].value = rowValues_[i].empty() ? nullptr : rowValues_[i].c_str();
   }
