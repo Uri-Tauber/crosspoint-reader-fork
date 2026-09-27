@@ -31,6 +31,8 @@ class Activity {
   virtual void onEnter();
   virtual void onExit();
   virtual void loop() {}
+  // Button-only UI hosts may retain input while a frame is being rendered.
+  virtual bool buffersButtons() const { return false; }
 
   virtual void render(RenderLock&&) {}
 

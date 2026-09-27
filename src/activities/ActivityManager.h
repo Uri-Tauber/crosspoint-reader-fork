@@ -65,10 +65,11 @@ class ActivityManager {
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
   std::atomic<bool> requestedUpdate{false};
+  std::atomic<bool> drainingNavigation{false};
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
+      : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateRecursiveMutex()) {
     assert(renderingMutex != nullptr && "Failed to create rendering mutex");
     stackActivities.reserve(10);
   }

@@ -88,7 +88,7 @@ void ActivityManager::renderTaskLoop() {
 }
 
 void ActivityManager::loop() {
-  if (mappedInput.consumeSuppressedRelease()) return;
+  if (!mappedInput.buffersButtons() && mappedInput.consumeSuppressedRelease()) return;
 
   if (currentActivity && currentActivity->requiresExclusiveStorageLoop()) {
     currentActivity->loop();
@@ -101,7 +101,7 @@ void ActivityManager::loop() {
     return;
   }
 
-  if (currentActivity) {
+  if (currentActivity && pendingAction == PendingAction::None) {
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
       if (currentActivity->handleHomeGesture()) {
         return;
@@ -128,11 +128,31 @@ void ActivityManager::loop() {
       return;
     }
 
-    // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
-    currentActivity->loop();
+    if (mappedInput.buffersButtons()) {
+      // Keep sampling while a frame is busy. Nested navigation callbacks may
+      // take their own RenderLock, so this mutex is recursive.
+      RenderLock lock(RenderLock::Mode::Try);
+      if (!lock.ownsLock()) return;
+      for (uint8_t i = 0; i < ButtonInputBuffer::CAPACITY; ++i) {
+        if (!mappedInput.beginBufferedButtons()) break;
+        const bool navigation = mappedInput.bufferedNavigationOnly();
+        // Activation/idle work retains the activity's own locking protocol:
+        // it may perform I/O or request a synchronous progress frame.
+        if (!navigation) lock.unlock();
+        drainingNavigation = navigation;
+        if (!mappedInput.consumeSuppressedRelease()) currentActivity->loop();
+        drainingNavigation = false;
+        mappedInput.endBufferedButtons();
+        if (!navigation || pendingAction != PendingAction::None || !mappedInput.nextBufferedNavigationOnly()) break;
+      }
+    } else {
+      // Activities own locking for non-buffered input and background work.
+      currentActivity->loop();
+    }
   }
 
   while (pendingAction != PendingAction::None) {
+    mappedInput.resetButtonBuffer(false);
     if (pendingAction == PendingAction::Pop) {
       RenderLock lock;
 
@@ -158,6 +178,7 @@ void ActivityManager::loop() {
       } else {
         currentActivity = std::move(stackActivities.back());
         stackActivities.pop_back();
+        mappedInput.resetButtonBuffer(currentActivity->buffersButtons());
         LOG_DBG("ACT", "Popped from activity stack, new size = %zu", stackActivities.size());
         // Handle result if necessary
         if (currentActivity->resultHandler) {
@@ -201,6 +222,7 @@ void ActivityManager::loop() {
       }
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
+      mappedInput.resetButtonBuffer(currentActivity->buffersButtons());
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -241,6 +263,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   } else {
     // No current activity, safe to launch immediately
     currentActivity = std::move(newActivity);
+    mappedInput.resetButtonBuffer(currentActivity->buffersButtons());
     currentActivity->onEnter();
   }
 }
@@ -384,7 +407,7 @@ ScreenshotInfo ActivityManager::getScreenshotInfo() const {
 }
 
 void ActivityManager::requestUpdate(bool immediate) {
-  if (immediate) {
+  if (immediate && !drainingNavigation) {
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
     }
@@ -427,7 +450,7 @@ void ActivityManager::requestUpdateAndWait() {
 // RenderLock
 
 RenderLock::RenderLock(Mode mode) {
-  isLocked = xSemaphoreTake(activityManager.renderingMutex, mode == Mode::Try ? 0 : portMAX_DELAY) == pdTRUE;
+  isLocked = xSemaphoreTakeRecursive(activityManager.renderingMutex, mode == Mode::Try ? 0 : portMAX_DELAY) == pdTRUE;
   assert((mode == Mode::Try || isLocked) && "Blocking render lock acquisition failed");
 }
 
@@ -435,14 +458,14 @@ RenderLock::RenderLock(Activity&) : RenderLock(Mode::Blocking) {}
 
 RenderLock::~RenderLock() {
   if (isLocked) {
-    xSemaphoreGive(activityManager.renderingMutex);
+    xSemaphoreGiveRecursive(activityManager.renderingMutex);
     isLocked = false;
   }
 }
 
 void RenderLock::unlock() {
   if (isLocked) {
-    xSemaphoreGive(activityManager.renderingMutex);
+    xSemaphoreGiveRecursive(activityManager.renderingMutex);
     isLocked = false;
   }
 }

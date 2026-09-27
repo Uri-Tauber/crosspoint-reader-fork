@@ -2,6 +2,7 @@
 
 #include <HalGPIO.h>
 
+#include "util/ButtonInputBuffer.h"
 #include "util/HomeButtonInput.h"
 
 class GfxRenderer;
@@ -45,6 +46,13 @@ class MappedInputManager {
   // Home-key actions so the next main-loop pass can dispatch them, while the
   // current action remains available for immediate Home cancellation.
   void update(bool deferHomeButtonAction = false) const;
+  // Buffered button dispatch is confined to ActivityManager; global controls stay live.
+  void resetButtonBuffer(bool enabled) const;
+  bool buffersButtons() const { return bufferButtons; }
+  bool beginBufferedButtons() const;
+  void endBufferedButtons() const { replayButtons = false; }
+  bool bufferedNavigationOnly() const;
+  bool nextBufferedNavigationOnly() const;
 #if FREEINK_CAP_TOUCH
   // X4 Pro delays a single power click until its frontlight double-click window
   // expires. The main loop supplies that one-frame event here.
@@ -136,6 +144,9 @@ class MappedInputManager {
   Button mapScreenDirection(Button button) const;
   Labels mapFrontLabels(const char* back, const char* confirm, const char* left, const char* right) const;
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
+  bool readButton(uint8_t button, bool (HalGPIO::*fn)(uint8_t) const) const;
+  uint8_t navigationButtonMask() const;
+  ButtonInputBuffer::Frame sampleButtons() const;
   // SDK edge classification (fui::edgeSwipe) + the shared decode/held-time
   // bookkeeping; the wrappers below give each edge its board meaning.
   bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;
@@ -157,6 +168,10 @@ class MappedInputManager {
   mutable unsigned long touchHeldOverrideAt = 0;
   mutable uint16_t longPressFiredButtons = 0;
   mutable uint16_t suppressedReleaseButtons = 0;
+  mutable ButtonInputBuffer buttonBuffer;
+  mutable ButtonInputBuffer::Frame buttonFrame{};
+  mutable bool bufferButtons = false;
+  mutable bool replayButtons = false;
 #if FREEINK_CAP_TOUCH
   bool powerConfirmClickFrame = false;
 #endif
