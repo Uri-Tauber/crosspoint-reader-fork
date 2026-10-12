@@ -64,6 +64,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // Toolbar; its tools open the Contents/Text/More bottom-sheet panels.
   enum class Overlay { None, Toolbar, Contents, Text, More };
   Overlay overlay = Overlay::None;
+  // Input retries the open after rendering yields; the render task can skip optional AA.
+  std::atomic<bool> pendingToolbarOpen{false};
   int focusedTool = 0;  // toolbar tool focus: 0=Contents, 1=Text, 2=More
   int panelIndex = 0;   // selected row within the active panel
   // Panel list navigation: a tap steps one row, a hold jumps PANEL_HOLD_STEP rows in one go

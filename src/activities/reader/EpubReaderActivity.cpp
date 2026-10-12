@@ -559,6 +559,14 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  if (pendingToolbarOpen.load()) {
+    if (usesToolbarMenu())
+      openOverlay(Overlay::Toolbar);
+    else
+      pendingToolbarOpen.store(false);
+    return;
+  }
+
   rememberBookOnceRendered();
 
   // Someone else turned the screen while this reader was stacked (the control
@@ -1993,6 +2001,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tDisplay = millis();
 
+  // ponytail: requests after this checkpoint finish AA; add later checkpoints if that wait remains too long.
+  // No gray-plane uploads have started, so the complete B/W framebuffer is still valid.
+  if (pendingToolbarOpen.load() && needsAnyGrayscale && !pageHasImages) {
+    renderer.waitRefreshComplete();
+    renderer.cleanupGrayscaleWithFrameBuffer();  // also commits a deferred combined B/W base
+    return;
+  }
+
   if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
     const int gh = renderer.getDisplayHeight();
@@ -2426,6 +2442,12 @@ void EpubReaderActivity::settleOverlayRefresh() {
 }
 
 void EpubReaderActivity::openOverlay(Overlay target) {
+  RenderLock lock(target == Overlay::Toolbar ? RenderLock::Mode::Try : RenderLock::Mode::Blocking);
+  if (!lock.ownsLock()) {
+    pendingToolbarOpen.store(true);
+    return;
+  }
+  pendingToolbarOpen.store(false);
   mappedInput.resetHomeButtonInput();
   const Overlay previous = overlay;
   overlay = target;
@@ -2438,7 +2460,6 @@ void EpubReaderActivity::openOverlay(Overlay target) {
       focusedTool = 0;
       break;
     case Overlay::Contents: {
-      RenderLock lock;
       panelIndex = currentTocIndex();
       // Fresh viewport opening on the current chapter, cursor shown or not.
       toolbarUi->nav().reset(panelIndex);
@@ -2471,10 +2492,6 @@ void EpubReaderActivity::openOverlay(Overlay target) {
   // images ever visibly ghost through the chrome, restore a HALF cleanup on
   // the first open (see #2190 for the mechanism).
   if (section && !pageBufferStale) {
-    // Serialize against the render task: renderBook may be mid-page (status
-    // bar included) in the shared framebuffer, and painting the chrome from
-    // the loop task at the same time interleaves the two frames.
-    RenderLock lock;
     settleOverlayRefresh();
     if (previous == Overlay::None) {
       // Snapshot the clean page so stepping back from a panel to the toolbar
