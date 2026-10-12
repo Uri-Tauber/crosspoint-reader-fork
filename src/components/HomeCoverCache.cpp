@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <Logging.h>
+#include <RenderCancellation.h>
 
 #include <algorithm>
 
@@ -37,7 +38,8 @@ void HomeCoverCache::prepare() {
   }
 }
 
-bool HomeCoverCache::paint(fui::Rect rect, size_t index, const std::string& path) {
+bool HomeCoverCache::paint(fui::Rect rect, size_t index, const std::string& path, bool loadCover) {
+  if (RenderCancellation::requested()) return false;
   if (index >= cachedCovers.size()) return false;
   auto& cached = cachedCovers[index];
   uint8_t* const cacheData = coverCache.get();
@@ -47,6 +49,7 @@ bool HomeCoverCache::paint(fui::Rect rect, size_t index, const std::string& path
     return true;
   }
   cached.valid = false;
+  if (!loadCover) return false;
   bool drawn = false;
   if (!path.empty() && Storage.openFileForRead("HOME", path, coverFile)) {
     if (coverBitmap.parseHeaders() == BmpReaderError::Ok && coverBitmap.getWidth() > 0 && coverBitmap.getHeight() > 0) {
@@ -67,6 +70,7 @@ bool HomeCoverCache::paint(fui::Rect rect, size_t index, const std::string& path
     }
     coverFile.close();
   }
+  if (RenderCancellation::requested()) return false;
   if (!drawn) {
     GUI.drawCoverPlaceholder(renderer, Rect{rect.x, rect.y, rect.width, rect.height});
     renderer.drawRect(rect.x, rect.y, rect.width, rect.height);

@@ -5,6 +5,7 @@
 #include <JPEGDEC.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <RenderCancellation.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -436,6 +437,7 @@ static void flushScaledRow(BmpConvertCtx* ctx) {
 int bmpDrawCallback(JPEGDRAW* pDraw) {
   auto* ctx = reinterpret_cast<BmpConvertCtx*>(pDraw->pUser);
   if (!ctx || ctx->error) return 0;
+  if (RenderCancellation::requested()) return 0;
   yieldDuringDecodeBlock(ctx);
 
   const uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
@@ -699,6 +701,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& b
   jpeg->setUserPointer(&ctx);
 
   rc = jpeg->decode(0, 0, 0);
+  if (RenderCancellation::requested()) return false;
 
   if (rc == 1 && ctx.smoothUpscale && !ctx.error) {
     finishSmoothUpscale(&ctx);

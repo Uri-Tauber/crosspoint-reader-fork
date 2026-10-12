@@ -10,6 +10,7 @@
 #include <LibraryBuilder.h>
 #include <LibraryIndexFile.h>
 #include <Memory.h>
+#include <RenderCancellation.h>
 #include <Utf8.h>
 #include <Xtc.h>
 
@@ -158,6 +159,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
   }
+  if (RenderCancellation::requested()) return;
   book.coverBmpPath.clear();
 }
 
@@ -168,11 +170,19 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
   int progress = 0;
   for (RecentBook& book : recentBooks) {
+    if (RenderCancellation::requested()) {
+      recentsLoading = false;
+      return;
+    }
     // The cover grid shares one slot size; generating at any other height
     // would rescale the dithered thumb at draw time and alias badly.
     const int thumbHeight = coverGridUi ? coverGridUi->thumbHeightFor() : coverHeight;
     if (coverGridUi) {
       loadGridCover(book, thumbHeight, showingLoading, popupRect);
+      if (RenderCancellation::requested()) {
+        recentsLoading = false;
+        return;
+      }
       ++progress;
       if (showingLoading) GUI.fillPopupProgress(renderer, popupRect, progress * 100 / recentBooks.size());
       continue;
@@ -193,6 +203,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           }
           GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
           bool success = epub.generateThumbBmp(thumbHeight);
+          if (RenderCancellation::requested()) {
+            recentsLoading = false;
+            return;
+          }
           if (!success) {
             RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
             book.coverBmpPath = "";
@@ -210,6 +224,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
             }
             GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
             bool success = xtc.generateThumbBmp(thumbHeight);
+            if (RenderCancellation::requested()) {
+              recentsLoading = false;
+              return;
+            }
             if (!success) {
               RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
               book.coverBmpPath = "";
@@ -300,10 +318,25 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
+  const int previousSelection = selectorIndex.load();
+  const ScopedCleanup interruptOnMove{[this, previousSelection] {
+    if (selectorIndex.load() != previousSelection) {
+      lastNavigationMs.store(millis());
+      renderInterrupted.store(true);
+    }
+  }};
+  // Keep cursor paints cheap; resume cover work after navigation has been quiet.
+  constexpr unsigned long COVER_NAVIGATION_IDLE_MS = 400;
+  const auto lastNavigation = lastNavigationMs.load();
+  if (lastNavigation != 0 && millis() - lastNavigation >= COVER_NAVIGATION_IDLE_MS && !RenderLock::peek()) {
+    lastNavigationMs.store(0);
+    requestUpdate();
+  }
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   auto activateSelection = [this] {
+    renderInterrupted.store(true);
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
       return;
@@ -462,6 +495,11 @@ void HomeActivity::loop() {
 }
 
 void HomeActivity::render(RenderLock&&) {
+  const bool interrupted = renderInterrupted.exchange(false);
+  const RenderCancellation::Scope cancellation{
+      [](const void* ctx) { return static_cast<const HomeActivity*>(ctx)->renderInterrupted.load(); }, this};
+  const int selection = selectorIndex.load();
+  const bool deferCovers = interrupted || lastNavigationMs.load() != 0;
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -471,13 +509,14 @@ void HomeActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
   if (coverGridUi) {
-    coverGridUi->setSelection(selectorIndex);
+    coverGridUi->setSelection(selection, !deferCovers);
     UITheme::getInstance().drawCoverGridHome(*coverGridUi);
     // Front Left/Right walk the tabs, so their hints read Left/Right; the
     // side page buttons (unhinted) walk the covers.
     const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
                                               tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (RenderCancellation::requested()) return;
     renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
                                                                    : HalDisplay::FAST_REFRESH);
     // Slot heights are recorded during the draw above; a change (first layout
@@ -492,7 +531,7 @@ void HomeActivity::render(RenderLock&&) {
     if (!firstRenderDone) {
       firstRenderDone = true;
       requestUpdate();
-    } else if (!recentsLoaded && !recentsLoading) {
+    } else if (!deferCovers && !recentsLoaded && !recentsLoading) {
       loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
       coverGridUi->refreshCoverPaths();
       requestUpdate();
@@ -517,9 +556,16 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = content.width;
   coverRectH = metrics.homeCoverTileHeight;
 
+  bool renderedCover = coverRendered || deferCovers;
   GUI.drawRecentBookCover(renderer, Rect{content.x, metrics.homeTopPadding, content.width, metrics.homeCoverTileHeight},
-                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
+                          recentBooks, selection, renderedCover, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
+  if (!deferCovers) coverRendered = renderedCover;
+  if (RenderCancellation::requested()) {
+    freeCoverBuffer();
+    coverRendered = false;
+    return;
+  }
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY), tr(STR_FILE_TRANSFER),
@@ -543,7 +589,7 @@ void HomeActivity::render(RenderLock&&) {
            pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
                          metrics.homeMenuTopOffset + metrics.buttonHintsHeight)},
       static_cast<int>(menuItems.size()),
-      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
+      metrics.homeContinueReadingInMenu ? selection : selection - recentBooks.size(),
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 
@@ -556,14 +602,17 @@ void HomeActivity::render(RenderLock&&) {
   if (!firstRenderDone) {
     firstRenderDone = true;
     requestUpdate();
-  } else if (!recentsLoaded && !recentsLoading) {
+  } else if (!deferCovers && !recentsLoaded && !recentsLoading) {
     recentsLoading = true;
     const int themeThumbHeight = GUI.homeCoverThumbHeight(renderer);
     loadRecentCovers(themeThumbHeight > 0 ? themeThumbHeight : metrics.homeCoverHeight);
   }
 }
 
-void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
+void HomeActivity::onSelectBook(const std::string& path) {
+  renderInterrupted.store(true);
+  activityManager.goToReader(path);
+}
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

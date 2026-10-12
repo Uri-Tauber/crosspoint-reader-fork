@@ -6,6 +6,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <PNGdec.h>
+#include <RenderCancellation.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -215,6 +216,7 @@ void convertLineToGray(const uint8_t* pPixels, uint8_t* grayLine, int width, int
 int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
+  if (RenderCancellation::requested()) return 0;
 
   ImageToFramebufferDecoder::yieldDuringDecode(ctx->lastYieldMs);
 
@@ -465,6 +467,10 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   rc = png->decode(&ctx, 0);
   unsigned long decodeTime = millis() - decodeStart;
 
+  if (RenderCancellation::requested()) {
+    ctx.cache.abort();
+    return false;
+  }
   ctx.grayLineBuffer = nullptr;
   ctx.alphaLineBuffer = nullptr;
 

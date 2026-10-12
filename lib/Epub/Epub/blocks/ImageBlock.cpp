@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <RenderCancellation.h>
 #include <Serialization.h>
 
 #include <cstdlib>
@@ -145,6 +146,10 @@ bool loadPxcSlot(uint64_t cacheHash, HalFile& cacheFile, uint16_t cachedWidth, u
     return false;
   }
   for (size_t i = 0; i < chunkCount; i++) {
+    if (RenderCancellation::requested()) {
+      releasePxcSlot();
+      return false;
+    }
     const size_t want = remaining < PXC_CHUNK_SIZE ? remaining : PXC_CHUNK_SIZE;
     if (ESP.getFreeHeap() < remaining + PXC_HEAP_RESERVE || ESP.getMaxAllocHeap() < want + PXC_MAX_ALLOC_RESERVE) {
       releasePxcSlot();
@@ -171,6 +176,7 @@ void renderRowsFromPxcSlot(GfxRenderer& renderer, int x, int y) {
   pw.init(renderer);
 
   for (int row = 0; row < pxcSlotHeight; row++) {
+    if (RenderCancellation::requested()) return;
     const uint8_t* rowBuffer = pxcRowPtr((size_t)row * bytesPerRow, bytesPerRow, tempRow);
     pw.beginRow(y + row);
     int colStart, colEnd;
@@ -224,6 +230,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 
   // Streaming fallback (slot didn't fit). A failed slot load may have consumed
   // part of the payload; rewind to just past the header.
+  if (RenderCancellation::requested()) return false;
   cacheFile.seek(4);
 
   // Read several rows per SD access. A one-row-per-read loop here means
@@ -250,6 +257,10 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   int rowsInBuffer = 0;
   int bufferRow = 0;
   for (int row = 0; row < cachedHeight; row++) {
+    if (RenderCancellation::requested()) {
+      free(readBuffer);
+      return false;
+    }
     if (bufferRow >= rowsInBuffer) {
       const int toRead = (cachedHeight - row < rowsPerRead) ? (cachedHeight - row) : rowsPerRead;
       const size_t bytes = (size_t)toRead * bytesPerRow;
@@ -312,6 +323,7 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 }
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
+  if (RenderCancellation::requested()) return;
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
   // suppression, so it would otherwise do a full (discarded) cache render every
@@ -353,12 +365,14 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
     renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
   }
+  if (RenderCancellation::requested()) return;
 
   // The build only header-probed the image for dimensions; pull the actual
   // file out of the book now, on first visit to the page.
   if (!srcPath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
     LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
     if (!extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) {
+      if (RenderCancellation::requested()) return;
       LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
     }
   }
@@ -406,6 +420,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   LOG_DBG("IMG", "Using %s decoder", decoder->getFormatName());
 
   bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
+  if (RenderCancellation::requested()) return;
   if (!success) {
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);

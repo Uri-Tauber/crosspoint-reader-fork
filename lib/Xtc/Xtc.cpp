@@ -10,6 +10,8 @@
 #include <Bitmap.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
+#include <RenderCancellation.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -191,6 +193,12 @@ bool Xtc::generateCoverBmp() const {
     LOG_DBG("XTC", "Failed to create cover BMP file");
     return false;
   }
+  const ScopedCleanup discardCancelledCover{[&] {
+    if (RenderCancellation::requested()) {
+      coverBmp.close();
+      Storage.remove(getCoverBmpPath().c_str());
+    }
+  }};
 
   if (bitDepth == 2) {
     // XTH 2-bit mode: preserve all 4 gray levels in a 2-bit BMP so the sleep
@@ -229,6 +237,7 @@ bool Xtc::generateCoverBmp() const {
     // XTH value -> BMP palette index (palette: 0=black, 1=dark, 2=light, 3=white)
     static constexpr uint8_t kXthToBmp[4] = {3, 1, 2, 0};
     for (uint16_t y = 0; y < pageInfo.height; y++) {
+      if (RenderCancellation::requested()) return false;
       memset(rowBuffer, 0x00, rowSize2);
 
       for (uint16_t x = 0; x < pageInfo.width; x++) {
@@ -261,6 +270,7 @@ bool Xtc::generateCoverBmp() const {
     const size_t srcRowSize = (pageInfo.width + 7) / 8;
 
     for (uint16_t y = 0; y < pageInfo.height; y++) {
+      if (RenderCancellation::requested()) return false;
       // Write source row
       coverBmp.write(pageBuffer + y * srcRowSize, srcRowSize);
 
@@ -325,8 +335,15 @@ bool Xtc::generateThumbBmp(int height) const {
       HalFile src, dst;
       if (Storage.openFileForRead("XTC", getCoverBmpPath(), src)) {
         if (Storage.openFileForWrite("XTC", getThumbBmpPath(height), dst)) {
+          const ScopedCleanup discardCancelledThumb{[&] {
+            if (RenderCancellation::requested()) {
+              dst.close();
+              Storage.remove(getThumbBmpPath(height).c_str());
+            }
+          }};
           uint8_t buffer[512];
           while (src.available()) {
+            if (RenderCancellation::requested()) return false;
             size_t bytesRead = src.read(buffer, sizeof(buffer));
             dst.write(buffer, bytesRead);
           }
@@ -373,6 +390,12 @@ bool Xtc::generateThumbBmp(int height) const {
     LOG_DBG("XTC", "Failed to create thumb BMP file");
     return false;
   }
+  const ScopedCleanup discardCancelledThumb{[&] {
+    if (RenderCancellation::requested()) {
+      thumbBmp.close();
+      Storage.remove(getThumbBmpPath(height).c_str());
+    }
+  }};
 
   // Write 1-bit BMP header (top-down row order)
   BmpHeader bmpHeader;
@@ -391,6 +414,7 @@ bool Xtc::generateThumbBmp(int height) const {
   uint8_t rowsSinceYield = 0;
 
   for (uint16_t dstY = 0; dstY < thumbHeight; dstY++) {
+    if (RenderCancellation::requested()) return false;
     memset(rowBuffer, 0xFF, rowSize);  // Start with all white (bit 1)
 
     // Calculate source Y range with bounds checking

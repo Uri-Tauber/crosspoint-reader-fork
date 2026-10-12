@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <RenderCancellation.h>
 #include <Serialization.h>
 
 namespace {
@@ -11,6 +12,7 @@ template <typename Predicate>
 void renderFilteredPageElements(const std::vector<std::unique_ptr<PageElement>>& elements, GfxRenderer& renderer,
                                 const int fontId, const int xOffset, const int yOffset, Predicate&& predicate) {
   for (const auto& element : elements) {
+    if (RenderCancellation::requested()) return;
     if (predicate(*element)) {
       element->render(renderer, fontId, xOffset, yOffset);
     }
@@ -140,6 +142,7 @@ void Page::renderImages(GfxRenderer& renderer, const int fontId, const int xOffs
 void Page::renderWithImagePlaceholders(GfxRenderer& renderer, const int fontId, const int xOffset,
                                        const int yOffset) const {
   for (const auto& element : elements) {
+    if (RenderCancellation::requested()) return;
     if (element->getTag() == TAG_PageImage) {
       static_cast<const PageImage&>(*element).renderPlaceholder(renderer, xOffset, yOffset);
     } else {

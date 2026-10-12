@@ -6,6 +6,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <PngToBmpConverter.h>
+#include <RenderCancellation.h>
 #include <Txt.h>
 #include <Utf8.h>
 #include <ZipFile.h>
@@ -1062,7 +1063,17 @@ bool Epub::extractItemToFile(const std::string& itemHref, const std::string& des
   }
   // Large images dominate lazy extraction. Match the section streamer size to
   // halve SD read/write calls while adding only 8 KB of transient ZIP buffers.
-  const bool ok = readItemContentsToStream(itemHref, out, 8192);
+  class CancellableOutput final : public Print {
+    HalFile& file;
+
+   public:
+    explicit CancellableOutput(HalFile& outFile) : file(outFile) {}
+    size_t write(uint8_t value) override { return write(&value, 1); }
+    size_t write(const uint8_t* bytes, size_t size) override {
+      return RenderCancellation::requested() ? 0 : file.write(bytes, size);
+    }
+  } output(out);
+  const bool ok = readItemContentsToStream(itemHref, output, 8192) && !RenderCancellation::requested();
   out.flush();
   out.close();
   if (!ok) {

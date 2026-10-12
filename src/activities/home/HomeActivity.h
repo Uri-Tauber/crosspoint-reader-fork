@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <functional>
 #include <vector>
 
@@ -13,7 +14,9 @@ struct Rect;
 class HomeActivity final : public Activity {
   std::unique_ptr<CoverGridHomeUi> coverGridUi;
   ButtonNavigator buttonNavigator;
-  int selectorIndex = 0;
+  std::atomic<int> selectorIndex{0};
+  std::atomic<bool> renderInterrupted{false};
+  std::atomic<unsigned long> lastNavigationMs{0};
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;

@@ -21,7 +21,10 @@ class CoverGridHomeUi final : public UiAppHost {
   explicit CoverGridHomeUi(GfxRenderer& renderer);
   void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading);
   void refreshCoverPaths();
-  void setSelection(int selection) { selected = selection; }
+  void setSelection(int selection, bool allowCoverLoading = true) {
+    selected = selection;
+    loadCovers = allowCoverLoading;
+  }
   int selectedAction(const MappedInputManager& input);
   // Exact generation height, shared by every slot and recorded during draw.
   // Thumbs must be generated at the drawn size: rescaling a dithered 1-bit
@@ -50,6 +53,7 @@ class CoverGridHomeUi final : public UiAppHost {
   int thumbHeight = 0;
   bool thumbHeightChanged = false;
   int selected = 0;
+  bool loadCovers = true;
   int pending = -1;
   int progress = -1;
   bool hasOpds = false;

@@ -5,6 +5,7 @@
 #include <InflateStream.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <RenderCancellation.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -672,6 +673,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
   // Process each scanline
   for (uint32_t y = 0; y < height; y++) {
+    if (RenderCancellation::requested()) return false;
     // Decode one scanline
     if (!decodeScanline(ctx)) {
       LOG_ERR("PNG", "Failed to decode scanline %u", y);
