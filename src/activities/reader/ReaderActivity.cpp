@@ -95,6 +95,8 @@ void ReaderActivity::rememberBookOnceRendered() {
 }
 
 void ReaderActivity::onExit() {
+  // Home navigation can bypass the loop tick that records the first rendered page.
+  rememberBookOnceRendered();
   Activity::onExit();
 
   // Keep rebuildable font buffers from pinning the heap between reading sessions.
