@@ -132,7 +132,7 @@ constexpr int32_t FP_MASK = FP_ONE - 1;
 int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
-  if (RenderCancellation::requested()) return 0;
+  if (RenderCancellation::imagesRequested()) return 0;
 
   ImageToFramebufferDecoder::yieldDuringDecode(ctx->lastYieldMs);
 
@@ -523,7 +523,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   rc = jpeg->decode(0, 0, jpegScaleOption);
   unsigned long decodeTime = millis() - decodeStart;
 
-  if (RenderCancellation::requested()) {
+  if (RenderCancellation::imagesRequested()) {
     ctx.cache.abort();
     return false;
   }

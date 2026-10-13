@@ -194,7 +194,7 @@ bool Xtc::generateCoverBmp() const {
     return false;
   }
   const ScopedCleanup discardCancelledCover{[&] {
-    if (RenderCancellation::requested()) {
+    if (RenderCancellation::imagesRequested()) {
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
     }
@@ -237,7 +237,7 @@ bool Xtc::generateCoverBmp() const {
     // XTH value -> BMP palette index (palette: 0=black, 1=dark, 2=light, 3=white)
     static constexpr uint8_t kXthToBmp[4] = {3, 1, 2, 0};
     for (uint16_t y = 0; y < pageInfo.height; y++) {
-      if (RenderCancellation::requested()) return false;
+      if (RenderCancellation::imagesRequested()) return false;
       memset(rowBuffer, 0x00, rowSize2);
 
       for (uint16_t x = 0; x < pageInfo.width; x++) {
@@ -270,7 +270,7 @@ bool Xtc::generateCoverBmp() const {
     const size_t srcRowSize = (pageInfo.width + 7) / 8;
 
     for (uint16_t y = 0; y < pageInfo.height; y++) {
-      if (RenderCancellation::requested()) return false;
+      if (RenderCancellation::imagesRequested()) return false;
       // Write source row
       coverBmp.write(pageBuffer + y * srcRowSize, srcRowSize);
 
@@ -336,14 +336,14 @@ bool Xtc::generateThumbBmp(int height) const {
       if (Storage.openFileForRead("XTC", getCoverBmpPath(), src)) {
         if (Storage.openFileForWrite("XTC", getThumbBmpPath(height), dst)) {
           const ScopedCleanup discardCancelledThumb{[&] {
-            if (RenderCancellation::requested()) {
+            if (RenderCancellation::imagesRequested()) {
               dst.close();
               Storage.remove(getThumbBmpPath(height).c_str());
             }
           }};
           uint8_t buffer[512];
           while (src.available()) {
-            if (RenderCancellation::requested()) return false;
+            if (RenderCancellation::imagesRequested()) return false;
             size_t bytesRead = src.read(buffer, sizeof(buffer));
             dst.write(buffer, bytesRead);
           }
@@ -391,7 +391,7 @@ bool Xtc::generateThumbBmp(int height) const {
     return false;
   }
   const ScopedCleanup discardCancelledThumb{[&] {
-    if (RenderCancellation::requested()) {
+    if (RenderCancellation::imagesRequested()) {
       thumbBmp.close();
       Storage.remove(getThumbBmpPath(height).c_str());
     }
@@ -414,7 +414,7 @@ bool Xtc::generateThumbBmp(int height) const {
   uint8_t rowsSinceYield = 0;
 
   for (uint16_t dstY = 0; dstY < thumbHeight; dstY++) {
-    if (RenderCancellation::requested()) return false;
+    if (RenderCancellation::imagesRequested()) return false;
     memset(rowBuffer, 0xFF, rowSize);  // Start with all white (bit 1)
 
     // Calculate source Y range with bounds checking

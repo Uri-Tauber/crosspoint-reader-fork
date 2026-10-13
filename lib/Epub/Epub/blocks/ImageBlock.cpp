@@ -146,7 +146,7 @@ bool loadPxcSlot(uint64_t cacheHash, HalFile& cacheFile, uint16_t cachedWidth, u
     return false;
   }
   for (size_t i = 0; i < chunkCount; i++) {
-    if (RenderCancellation::requested()) {
+    if (RenderCancellation::imagesRequested()) {
       releasePxcSlot();
       return false;
     }
@@ -176,7 +176,7 @@ void renderRowsFromPxcSlot(GfxRenderer& renderer, int x, int y) {
   pw.init(renderer);
 
   for (int row = 0; row < pxcSlotHeight; row++) {
-    if (RenderCancellation::requested()) return;
+    if (RenderCancellation::imagesRequested()) return;
     const uint8_t* rowBuffer = pxcRowPtr((size_t)row * bytesPerRow, bytesPerRow, tempRow);
     pw.beginRow(y + row);
     int colStart, colEnd;
@@ -230,7 +230,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 
   // Streaming fallback (slot didn't fit). A failed slot load may have consumed
   // part of the payload; rewind to just past the header.
-  if (RenderCancellation::requested()) return false;
+  if (RenderCancellation::imagesRequested()) return false;
   cacheFile.seek(4);
 
   // Read several rows per SD access. A one-row-per-read loop here means
@@ -257,7 +257,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   int rowsInBuffer = 0;
   int bufferRow = 0;
   for (int row = 0; row < cachedHeight; row++) {
-    if (RenderCancellation::requested()) {
+    if (RenderCancellation::imagesRequested()) {
       free(readBuffer);
       return false;
     }
@@ -331,6 +331,12 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // passes; on first view this just moves the one-time decode to the BW pass.
   FontCacheManager* fcm = renderer.getFontCacheManager();
   if (fcm && fcm->isScanning()) return;
+  const auto skipImage = [&] {
+    if (!RenderCancellation::imagesRequested()) return false;
+    if (!RenderCancellation::requested()) renderPlaceholder(renderer, x, y);
+    return true;
+  };
+  if (skipImage()) return;
 
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
@@ -362,17 +368,18 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+    if (skipImage()) return;
     renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
   }
-  if (RenderCancellation::requested()) return;
+  if (skipImage()) return;
 
   // The build only header-probed the image for dimensions; pull the actual
   // file out of the book now, on first visit to the page.
   if (!srcPath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
     LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
     if (!extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) {
-      if (RenderCancellation::requested()) return;
+      if (skipImage()) return;
       LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
     }
   }
@@ -420,7 +427,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   LOG_DBG("IMG", "Using %s decoder", decoder->getFormatName());
 
   bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
-  if (RenderCancellation::requested()) return;
+  if (skipImage()) return;
   if (!success) {
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);

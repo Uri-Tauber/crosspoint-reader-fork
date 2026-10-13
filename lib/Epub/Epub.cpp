@@ -1070,10 +1070,10 @@ bool Epub::extractItemToFile(const std::string& itemHref, const std::string& des
     explicit CancellableOutput(HalFile& outFile) : file(outFile) {}
     size_t write(uint8_t value) override { return write(&value, 1); }
     size_t write(const uint8_t* bytes, size_t size) override {
-      return RenderCancellation::requested() ? 0 : file.write(bytes, size);
+      return RenderCancellation::imagesRequested() ? 0 : file.write(bytes, size);
     }
   } output(out);
-  const bool ok = readItemContentsToStream(itemHref, output, 8192) && !RenderCancellation::requested();
+  const bool ok = readItemContentsToStream(itemHref, output, 8192) && !RenderCancellation::imagesRequested();
   out.flush();
   out.close();
   if (!ok) {

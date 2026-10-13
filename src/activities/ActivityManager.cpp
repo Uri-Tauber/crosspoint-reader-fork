@@ -70,7 +70,7 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
-    if (currentActivity) {
+    if (currentActivity && !navigationPending.load()) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       // Night mode is a global output polarity applied to every activity.
       // The sleep screen forces normal polarity itself (SleepActivity).
@@ -103,7 +103,7 @@ void ActivityManager::loop() {
     return;
   }
 
-  if (currentActivity) {
+  if (currentActivity && !navigationPending.load()) {
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
       if (currentActivity->handleHomeGesture()) {
         return;
@@ -143,6 +143,7 @@ void ActivityManager::loop() {
         // Should never happen in practice
         LOG_ERR("ACT", "Pop set but currentActivity is null; ignoring pop request");
         pendingAction = PendingAction::None;
+        navigationPending.store(false);
         continue;
       }
 
@@ -151,6 +152,7 @@ void ActivityManager::loop() {
       // Destroy the current activity
       exitActivity(lock);
       pendingAction = PendingAction::None;
+      navigationPending.store(false);
 
       if (stackActivities.empty()) {
         LOG_DBG("ACT", "No more activities on stack, going home");
@@ -204,6 +206,7 @@ void ActivityManager::loop() {
       }
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
+      navigationPending.store(false);
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -234,6 +237,7 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
 }
 
 void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
+  navigationPending.store(true);
   mappedInput.resetHomeButtonInput();
   // Note: no lock here, this is usually called by loop() and we may run into deadlock
   if (currentActivity) {
@@ -244,6 +248,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   } else {
     // No current activity, safe to launch immediately
     currentActivity = std::move(newActivity);
+    navigationPending.store(false);
     currentActivity->onEnter();
   }
 }
@@ -353,6 +358,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 
 void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {
+  navigationPending.store(true);
   mappedInput.resetHomeButtonInput();
   if (pendingActivity) {
     // Should never happen in practice
@@ -364,6 +370,7 @@ void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {
 }
 
 void ActivityManager::popActivity() {
+  navigationPending.store(true);
   mappedInput.resetHomeButtonInput();
   if (pendingActivity) {
     // Should never happen in practice

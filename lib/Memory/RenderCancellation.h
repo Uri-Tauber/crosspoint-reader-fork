@@ -13,16 +13,28 @@ class RenderCancellation {
   inline static std::atomic<TaskHandle_t> owner{nullptr};
   inline static Check check = nullptr;
   inline static const void* context = nullptr;
-  inline static bool cancelled = false;
+  inline static Check imageCheck = nullptr;
+  enum class Stop { None, Images, Page };
+  inline static Stop stop = Stop::None;
+
+  static Stop poll() {
+    if (owner.load(std::memory_order_acquire) != xTaskGetCurrentTaskHandle()) return Stop::None;
+    if (stop != Stop::Page && check(context))
+      stop = Stop::Page;
+    else if (stop == Stop::None && imageCheck && imageCheck(context))
+      stop = Stop::Images;
+    return stop;
+  }
 
  public:
   class Scope {
    public:
-    Scope(Check predicate, const void* ctx) {
+    Scope(Check predicate, const void* ctx, Check imagePredicate = nullptr) {
       assert(owner.load() == nullptr);
       check = predicate;
       context = ctx;
-      cancelled = false;
+      imageCheck = imagePredicate;
+      stop = Stop::None;
       owner.store(xTaskGetCurrentTaskHandle(), std::memory_order_release);
     }
     Scope(const Scope&) = delete;
@@ -30,9 +42,6 @@ class RenderCancellation {
     ~Scope() { owner.store(nullptr, std::memory_order_release); }
   };
 
-  static bool requested() {
-    if (owner.load(std::memory_order_acquire) != xTaskGetCurrentTaskHandle()) return false;
-    cancelled = cancelled || check(context);
-    return cancelled;
-  }
+  static bool requested() { return poll() == Stop::Page; }
+  static bool imagesRequested() { return poll() != Stop::None; }
 };

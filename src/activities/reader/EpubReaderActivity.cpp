@@ -560,13 +560,8 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  if (pendingToolbarOpen.load()) {
-    if (usesToolbarMenu())
-      openOverlay(Overlay::Toolbar);
-    else
-      pendingToolbarOpen.store(false);
-    return;
-  }
+  if (!usesToolbarMenu()) pendingToolbarOpen.store(false);
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) pendingToolbarOpen.store(false);
 
   rememberBookOnceRendered();
 
@@ -582,9 +577,10 @@ void EpubReaderActivity::loop() {
   constexpr unsigned long IDLE_PREWARM_DEBOUNCE_MS = 400;
   {
     RenderLock lock(RenderLock::Mode::Try);
-    if (lock.ownsLock() && section && !section->isBuilding() && renderer.hasFrameBuffer() &&
-        lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS &&
-        ESP.getFreeHeap() > RENDER_MIN_FREE_HEAP && ESP.getMaxAllocHeap() > BACKGROUND_BUILD_MIN_MAX_ALLOC &&
+    if (lock.ownsLock() && !pendingToolbarOpen.load() && section && !section->isBuilding() &&
+        renderer.hasFrameBuffer() && lastRenderCompleteMs != 0 &&
+        millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS && ESP.getFreeHeap() > RENDER_MIN_FREE_HEAP &&
+        ESP.getMaxAllocHeap() > BACKGROUND_BUILD_MIN_MAX_ALLOC &&
         (idlePrewarmSpine != currentSpineIndex || idlePrewarmPage != section->currentPage)) {
       idlePrewarmSpine = currentSpineIndex;
       idlePrewarmPage = section->currentPage;
@@ -605,8 +601,8 @@ void EpubReaderActivity::loop() {
 
   {
     RenderLock lock(RenderLock::Mode::Try);
-    if (lock.ownsLock() && section && !section->isBuilding() && section->isPartial() && buildViewportWidth > 0 &&
-        !partialRebuildStartFailed &&
+    if (lock.ownsLock() && !pendingToolbarOpen.load() && section && !section->isBuilding() && section->isPartial() &&
+        buildViewportWidth > 0 && !partialRebuildStartFailed &&
         section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount)) {
       const ReaderRenderSpec buildSpec = SETTINGS.readerRenderSpec(buildViewportWidth, buildViewportHeight);
       if (!section->startBuild(buildSpec)) {
@@ -622,7 +618,8 @@ void EpubReaderActivity::loop() {
   {
     RenderLock lock(RenderLock::Mode::Try);
     // Not under an open toolbar or panel: those repaint straight onto the page in the framebuffer.
-    if (lock.ownsLock() && overlay == Overlay::None && backgroundBuildWanted() && buildTickHeapGate()) {
+    if (lock.ownsLock() && !pendingToolbarOpen.load() && overlay == Overlay::None && backgroundBuildWanted() &&
+        buildTickHeapGate()) {
       // A build step can lend the framebuffer (image probes), which hands it back white while the
       // panel still shows the page; redraw so nothing is later painted over the blank buffer.
       const uint32_t loansBefore = renderer.frameBufferLoanCount();
@@ -853,6 +850,7 @@ void EpubReaderActivity::loop() {
   }
 
   if (handleBackNavigation()) {
+    pendingToolbarOpen.store(false);
     return;
   }
 
@@ -895,8 +893,10 @@ void EpubReaderActivity::loop() {
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
   if (!prevTriggered && !nextTriggered) {
+    if (pendingToolbarOpen.load()) openOverlay(Overlay::Toolbar);
     return;
   }
+  pendingToolbarOpen.store(false);
 
   if (handleEndOfBookPageTurn(prevTriggered, nextTriggered)) {
     return;
@@ -1784,10 +1784,17 @@ void EpubReaderActivity::renderBook() {
 
     const auto start = millis();
     const RenderCancellation::Scope cancellation{
-        [](const void* ctx) { return static_cast<const EpubReaderActivity*>(ctx)->pendingManualTurn.load() != 0; },
-        this};
+        [](const void* ctx) {
+          return activityManager.isNavigationPending() ||
+                 static_cast<const EpubReaderActivity*>(ctx)->pendingManualTurn.load() != 0;
+        },
+        this, [](const void* ctx) { return static_cast<const EpubReaderActivity*>(ctx)->pendingToolbarOpen.load(); }};
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     if (RenderCancellation::requested()) {
+      if (activityManager.isNavigationPending()) {
+        pendingToolbarOpen.store(false);
+        pendingManualTurn.store(0);
+      }
       pageBufferStale = true;
       return;
     }
@@ -1922,10 +1929,15 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.waitRefreshComplete();
     renderer.setRenderMode(GfxRenderer::BW);
     if (bwStored) {
-      renderer.restoreBwBuffer();
+      renderer.restoreBwBuffer(!renderer.combinesGrayscaleBase());
       bwStored = false;
-    } else if (baseStarted) {
+    } else if (baseStarted && !renderer.combinesGrayscaleBase()) {
       renderer.cleanupGrayscaleWithFrameBuffer();
+    }
+    if (baseStarted && renderer.combinesGrayscaleBase()) {
+      // Cleanup can activate complete staged gray planes; explicitly settle B/W.
+      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      markPageRendered();
     }
     if (baseStarted) pagesUntilFullRefresh = 1;
     return true;
@@ -1972,12 +1984,29 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // A4 replaces the whole frame with its gray planes, including the status bar.
     if (absoluteImageGrayscale || BoardConfig::isEegoA4()) renderStatusBar();
   };
+  const auto finishToolbarBackdrop = [&] {
+    if (cancelPageRender()) return true;
+    if (!pendingToolbarOpen.load() && !RenderCancellation::imagesRequested()) return false;
+    renderer.waitRefreshComplete();
+    renderer.setRenderMode(GfxRenderer::BW);
+    if (bwStored) {
+      renderer.restoreBwBuffer(!renderer.combinesGrayscaleBase());
+      bwStored = false;
+    } else if (!renderer.combinesGrayscaleBase()) {
+      renderer.cleanupGrayscaleWithFrameBuffer();
+    }
+    // Paint deferred bases without activating their staged gray planes.
+    if (absoluteImageGrayscale || renderer.combinesGrayscaleBase()) renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    markPageRendered();
+    return true;
+  };
 
   if (pageHasImagesNeedingDecode) {
     page->renderWithImagePlaceholders(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     renderStatusBar();
     if (cancelPageRender()) return;
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    markPageRendered();
     renderer.clearScreen();
   }
 
@@ -1989,6 +2018,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
   forcedRefreshPending = false;
   baseStarted = true;
+  if (pendingToolbarOpen.load()) {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    markPageRendered();
+    return;
+  }
   if (absoluteImageGrayscale) {
     const auto baseMode = cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
     if (!renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute, baseMode)) {
@@ -2025,15 +2059,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
   const auto tDisplay = millis();
-  if (cancelPageRender()) return;
-
-  // ponytail: toolbar requests after this checkpoint finish AA; add later checkpoints if that wait remains too long.
-  // No gray-plane uploads have started, so the complete B/W framebuffer is still valid.
-  if (pendingToolbarOpen.load() && needsAnyGrayscale && !pageHasImages) {
-    renderer.waitRefreshComplete();
-    renderer.cleanupGrayscaleWithFrameBuffer();  // also commits a deferred combined B/W base
-    return;
-  }
+  if (!absoluteImageGrayscale && !combinedGrayscaleBase) markPageRendered();
+  if (finishToolbarBackdrop()) return;
 
   if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
@@ -2049,7 +2076,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.clearScreen(0x00);
         renderGrayscalePass();
         renderer.endStripTarget();
-        if (RenderCancellation::requested()) return;
+        if (RenderCancellation::imagesRequested() || pendingToolbarOpen.load()) return;
       }
     };
 
@@ -2064,9 +2091,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
     if (lsbPlaneBuf) {
       renderPlaneToBuffer(true, lsbPlaneBuf.get());
-      if (cancelPageRender()) return;
+      if (finishToolbarBackdrop()) return;
       if (msbPlaneBuf) renderPlaneToBuffer(false, msbPlaneBuf.get());
-      if (cancelPageRender()) return;
+      if (finishToolbarBackdrop()) return;
       const auto tGrayRender = millis();
 
       renderer.waitRefreshComplete();
@@ -2077,13 +2104,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.writeGrayscalePlaneStrip(false, msbPlaneBuf.get(), 0, gh);
       } else {
         renderPlaneToBuffer(false, lsbPlaneBuf.get());
-        if (cancelPageRender()) return;
+        if (finishToolbarBackdrop()) return;
         renderer.writeGrayscalePlaneStrip(false, lsbPlaneBuf.get(), 0, gh);
       }
       const auto tGrayWrite = millis();
 
       renderer.setRenderMode(GfxRenderer::BW);
-      if (cancelPageRender()) return;
+      if (finishToolbarBackdrop()) return;
       renderer.displayGrayBuffer();
       const auto tGrayDisplay = millis();
 
@@ -2117,7 +2144,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           renderer.clearScreen(0x00);
           renderGrayscalePass();
           renderer.endStripTarget();
-          if (cancelPageRender()) return;
+          if (finishToolbarBackdrop()) return;
           renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
         }
         const auto tGrayLsb = millis();
@@ -2129,13 +2156,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           renderer.clearScreen(0x00);
           renderGrayscalePass();
           renderer.endStripTarget();
-          if (cancelPageRender()) return;
+          if (finishToolbarBackdrop()) return;
           renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
         }
         const auto tGrayMsb = millis();
 
         renderer.setRenderMode(GfxRenderer::BW);
-        if (cancelPageRender()) return;
+        if (finishToolbarBackdrop()) return;
         renderer.displayGrayBuffer();
         const auto tGrayDisplay = millis();
 
@@ -2163,17 +2190,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       renderGrayscalePass();
-      if (cancelPageRender()) return;
+      if (finishToolbarBackdrop()) return;
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
       renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
-      if (cancelPageRender()) return;
+      if (finishToolbarBackdrop()) return;
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
 
+      if (finishToolbarBackdrop()) return;
       renderer.displayGrayBuffer();
       const auto tGrayDisplay = millis();
       renderer.setRenderMode(GfxRenderer::BW);

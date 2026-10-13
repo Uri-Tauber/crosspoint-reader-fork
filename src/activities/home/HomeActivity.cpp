@@ -496,8 +496,11 @@ void HomeActivity::loop() {
 
 void HomeActivity::render(RenderLock&&) {
   const bool interrupted = renderInterrupted.exchange(false);
-  const RenderCancellation::Scope cancellation{
-      [](const void* ctx) { return static_cast<const HomeActivity*>(ctx)->renderInterrupted.load(); }, this};
+  const RenderCancellation::Scope cancellation{[](const void* ctx) {
+                                                 return activityManager.isNavigationPending() ||
+                                                        static_cast<const HomeActivity*>(ctx)->renderInterrupted.load();
+                                               },
+                                               this};
   const int selection = selectorIndex.load();
   const bool deferCovers = interrupted || lastNavigationMs.load() != 0;
   const auto& metrics = UITheme::getInstance().getMetrics();

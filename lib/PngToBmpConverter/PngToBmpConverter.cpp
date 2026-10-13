@@ -673,7 +673,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
   // Process each scanline
   for (uint32_t y = 0; y < height; y++) {
-    if (RenderCancellation::requested()) return false;
+    if (RenderCancellation::imagesRequested()) return false;
     // Decode one scanline
     if (!decodeScanline(ctx)) {
       LOG_ERR("PNG", "Failed to decode scanline %u", y);
