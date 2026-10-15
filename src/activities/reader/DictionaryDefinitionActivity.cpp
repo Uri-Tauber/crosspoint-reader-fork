@@ -181,24 +181,21 @@ bool DictionaryDefinitionActivity::wrapText() {
   uint32_t lineStart = 0;
   uint32_t lineEnd = 0;  // one past the last token byte on the current line
   int lineWidth = 0;
-  bool allocationFailed = false;
 
   const auto flushLine = [&](uint32_t nextStart) {
-    if (lineCount == lineCapacity && !reserveLines(lineCapacity * 2)) {
-      allocationFailed = true;
-      return;
-    }
+    if (lineCount == lineCapacity && !reserveLines(lineCapacity * 2)) return false;
     lines[lineCount++] = {lineStart, static_cast<uint16_t>(lineEnd - lineStart)};
     lineStart = nextStart;
     lineEnd = nextStart;
     lineWidth = 0;
+    return true;
   };
 
   uint32_t i = 0;
-  while (i < n && !allocationFailed) {
+  while (i < n) {
     const char c = text[i];
     if (c == '\n' || c == '\0') {
-      flushLine(i + 1);
+      if (!flushLine(i + 1)) return false;
       i++;
       continue;
     }
@@ -230,7 +227,7 @@ bool DictionaryDefinitionActivity::wrapText() {
       lineEnd = tokenStart + tokenLen;
       lineWidth += spaceWidth + tokenWidth;
     } else {
-      flushLine(tokenStart);
+      if (!flushLine(tokenStart)) return false;
       lineEnd = tokenStart + tokenLen;
       lineWidth = tokenWidth;
     }
@@ -238,7 +235,7 @@ bool DictionaryDefinitionActivity::wrapText() {
     // An unbreakable token wider than the screen is now alone on the line
     // (any previous content was flushed above): split it at the widest
     // fitting UTF-8 boundary and carry the remainder forward.
-    while (lineWidth > maxWidth && lineEnd - lineStart > 1 && !allocationFailed) {
+    while (lineWidth > maxWidth && lineEnd - lineStart > 1) {
       const uint32_t len = lineEnd - lineStart;
       uint32_t lastFit = 0;
       for (uint32_t f = 1; f <= len; f++) {
@@ -255,14 +252,12 @@ bool DictionaryDefinitionActivity::wrapText() {
       }
       const uint32_t rest = lineStart + lastFit;
       lineEnd = rest;
-      flushLine(rest);
+      if (!flushLine(rest)) return false;
       lineEnd = rest + (len - lastFit);
       lineWidth = measureSpan(fontId, text + lineStart, lineEnd - lineStart);
     }
   }
-  if (allocationFailed) return false;
-  if (lineEnd > lineStart) flushLine(n);
-  if (allocationFailed) return false;
+  if (lineEnd > lineStart && !flushLine(n)) return false;
 
   // Trim trailing blank lines so the last page is not empty padding.
   while (lineCount > 0 && lines[lineCount - 1].len == 0) lineCount--;
