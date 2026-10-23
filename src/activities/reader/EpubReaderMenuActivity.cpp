@@ -94,6 +94,7 @@ void EpubReaderMenuActivity::rebuildRows() {
     visibleRows[header] = {category, -1};
     menuRowItems[header] = {};
     menuRowItems[header].label = I18N.get(categoryLabel(category));
+    menuRowItems[header].bold = true;
     menuRowItems[header].value = open ? "-" : "+";
     menuRowItems[header].actionValue = header;
     if (menuState.selectedCategory == category) selected = header;
