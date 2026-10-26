@@ -304,7 +304,7 @@ int FrontlightPanelActivity::computePanelBottom() const {
   if (mappedInput.hasTouch()) y += kQuickControlSize;
   // The sheet's grabber band: content margin + grabber + air to the edge.
   // buildPanelScreen() feeds the same theme spacings into SheetProps.
-  y += tokens.spaceLg + kGrabberHeight + tokens.spaceLg + tokens.spaceMd;
+  y += 2 * (tokens.spaceLg + tokens.spaceMd) + kGrabberHeight;
   return y;
 }
 
@@ -356,10 +356,9 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   // it. (No header: the panel is a floating card, and its own grabber says
   // what it is.)
   fui::SheetProps sheetProps;
-  // A roomy band above the bottom rule: the grabber gets a full spaceLg of
-  // air on both sides so the last row of content never crowds the sheet edge.
-  sheetProps.grabberMargin = theme.spaceLg;
-  sheetProps.grabberInset = static_cast<int16_t>(theme.spaceLg + theme.spaceMd);
+  // Keep equal padding above and below the grabber.
+  sheetProps.grabberMargin = static_cast<int16_t>(theme.spaceLg + theme.spaceMd);
+  sheetProps.grabberInset = sheetProps.grabberMargin;
   screen.sheet(sheetProps, static_cast<int16_t>(panelBottom));
   screen.insetContent(fui::Insets{0, kPanelSideMargin, 0, kPanelSideMargin});
 
