@@ -23,18 +23,55 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "components/HomeMenu.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, Library, File transfer, Settings
-  if (!recentBooks.empty()) {
-    count += recentBooks.size();
+int HomeActivity::getMenuItemCount() const { return static_cast<int>(recentBooks.size()) + menuItems.size; }
+
+int HomeActivity::initialMenuIndex() const {
+  using home_menu::Item;
+  switch (initialMenuItem) {
+    case HomeMenuItem::FILE_BROWSER:
+      return menuItems.indexOf(Item::Files);
+    case HomeMenuItem::LIBRARY:
+      return menuItems.indexOf(Item::Library);
+    case HomeMenuItem::OPDS_BROWSER:
+      return menuItems.indexOf(hasPlugins ? Item::Plugins : Item::Opds);
+    case HomeMenuItem::FILE_TRANSFER:
+      return menuItems.indexOf(Item::Transfer);
+    case HomeMenuItem::SETTINGS_MENU:
+      return menuItems.indexOf(Item::Settings);
+    case HomeMenuItem::NONE:
+      return 0;
   }
-  if (hasLibrarySlot()) {
-    count++;
+  return 0;
+}
+
+void HomeActivity::showOverflow() {
+  const auto hidden = home_menu::takeHidden();
+  if (!hidden) return;
+  overflowPopup = makeUniqueNoThrow<OptionPopup>();
+  if (!overflowPopup) {
+    LOG_ERR("HOME", "OOM: home menu popup (%u bytes)", unsigned(sizeof(OptionPopup)));
+    return;
   }
-  return count;
+  size_t length = strlen(tr(STR_HOME_MENU_NO_SPACE));
+  for (auto item : home_menu::ORDER) {
+    if (hidden & home_menu::itemBit(item)) length += strlen(I18N.get(home_menu::label(item))) + 2;
+  }
+  std::string message;
+  message.reserve(length + 1);
+  message = tr(STR_HOME_MENU_NO_SPACE);
+  bool first = true;
+  for (auto item : home_menu::ORDER) {
+    if (!(hidden & home_menu::itemBit(item))) continue;
+    message += first ? " " : ", ";
+    message += I18N.get(home_menu::label(item));
+    first = false;
+  }
+  const char* options[] = {tr(STR_OK_BUTTON)};
+  overflowPopup->showMessage(tr(STR_HOME_MENU), message.c_str(), options, 1, 0, nullptr);
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
@@ -241,16 +278,19 @@ void HomeActivity::onEnter() {
     coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
     if (!coverGridUi) LOG_ERR("HOME", "OOM: cover grid UI; using standard home");
   }
+  home_menu::reconcile(coverGridUi ? CoverGridHomeUi::menuCapacity(renderer) : GUI.getHomeMenuCapacity(renderer));
+  menuItems = home_menu::collect(SETTINGS.homeMenuItems & home_menu::available());
   loadRecentBooks(coverGridUi ? CoverGridHomeUi::MAX_BOOKS : metrics.homeRecentBooksCount);
   hasContinueReading = !recentBooks.empty();
   if (coverGridUi) {
     fillCoverGridFromLibrary();
     resolveGridCoverPaths();
-    coverGridUi->begin(recentBooks, hasLibrarySlot(), hasContinueReading);
+    coverGridUi->begin(recentBooks, menuItems, hasContinueReading);
   }
 
   const auto base = static_cast<int>(recentBooks.size());
-  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasLibrarySlot());
+  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + initialMenuIndex();
+  showOverflow();
 
   // Trigger first update
   requestUpdate();
@@ -302,6 +342,13 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
+  if (overflowPopup) {
+    if (overflowPopup->handleInput(mappedInput, [this] { requestUpdate(); })) return;
+    RenderLock lock(*this);
+    overflowPopup.reset();
+    requestUpdate();
+    return;
+  }
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
@@ -311,23 +358,24 @@ void HomeActivity::loop() {
       return;
     }
     const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    switch (indexToMenuItem(menuIndex, hasLibrarySlot())) {
-      case HomeMenuItem::FILE_BROWSER:
+    switch (menuItems.values[menuIndex]) {
+      case home_menu::Item::Files:
         onFileBrowserOpen();
         break;
-      case HomeMenuItem::LIBRARY:
+      case home_menu::Item::Library:
         onLibraryOpen();
         break;
-      case HomeMenuItem::OPDS_BROWSER:  // the library slot
-        hasPlugins ? onPluginsOpen() : onOpdsBrowserOpen();
+      case home_menu::Item::Opds:
+        onOpdsBrowserOpen();
         break;
-      case HomeMenuItem::FILE_TRANSFER:
+      case home_menu::Item::Plugins:
+        onPluginsOpen();
+        break;
+      case home_menu::Item::Transfer:
         onFileTransferOpen();
         break;
-      case HomeMenuItem::SETTINGS_MENU:
+      case home_menu::Item::Settings:
         onSettingsOpen();
-        break;
-      default:
         break;
     }
   };
@@ -433,15 +481,16 @@ void HomeActivity::loop() {
     return;
   }
 
-  const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
+  const Rect menuBounds = GUI.getHomeMenuBounds(renderer);
   const int renderedMenuCount =
       menuCount - (metrics.homeContinueReadingInMenu ? 0 : static_cast<int>(recentBooks.size()));
   int menuRow = -1;
   // Row height from the theme, not the metrics table: RoundedRaff draws
   // font-derived rows and the touch grid must match the visuals exactly.
   const int menuRowHeight = GUI.getMenuRowHeight(renderer);
-  const auto menuTouch = mappedInput.rowTouch(menuRow, menuTop, menuRowHeight + metrics.menuSpacing, renderedMenuCount,
-                                              0, INT32_MAX, menuRowHeight);
+  const auto menuTouch =
+      mappedInput.rowTouch(menuRow, menuBounds.y, menuRowHeight + metrics.menuSpacing, renderedMenuCount, menuBounds.x,
+                           menuBounds.x + menuBounds.width, menuRowHeight);
   if (menuTouch != MappedInputManager::RowTouch::None) {
     const int touchedIndex =
         metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size());
@@ -466,7 +515,6 @@ void HomeActivity::loop() {
 void HomeActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   // Content columns clear the bezel insets on rounded panels. The header
   // self-insets in drawHeader, so only the cover/menu need it here.
   const Rect content = UITheme::getInstance().getContentArea(renderer);
@@ -480,6 +528,12 @@ void HomeActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
                                               tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (overflowPopup && overflowPopup->isActive()) {
+      overflowPopup->render(renderer);
+      renderer.displayBuffer();
+      firstRenderDone = true;
+      return;
+    }
     renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
                                                                    : HalDisplay::FAST_REFRESH);
     // Slot heights are recorded during the draw above; a change (first layout
@@ -523,35 +577,28 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_LIBRARY), tr(STR_FILE_TRANSFER),
-                                        tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Library, Transfer, Settings};
-
-  if (hasLibrarySlot()) {
-    menuItems.insert(menuItems.begin() + 2, hasPlugins ? tr(STR_PLUGINS) : tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Plugins);
-  }
-
-  if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
-    // Insert Continue Reading at the top if enabled in theme
-    menuItems.insert(menuItems.begin(), tr(STR_CONTINUE_READING));
-    menuIcons.insert(menuIcons.begin(), Book);
-  }
-
+  const bool continueRow = metrics.homeContinueReadingInMenu && !recentBooks.empty();
   GUI.drawButtonMenu(
-      renderer,
-      Rect{content.x, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, content.width,
-           pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
-                         metrics.homeMenuTopOffset + metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()),
+      renderer, GUI.getHomeMenuBounds(renderer), menuItems.size + (continueRow ? 1 : 0),
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
-      [&menuItems](int index) { return std::string(menuItems[index]); },
-      [&menuIcons](int index) { return menuIcons[index]; });
+      [this, continueRow](int index) {
+        return std::string(continueRow && index == 0
+                               ? tr(STR_CONTINUE_READING)
+                               : I18N.get(home_menu::label(menuItems.values[index - (continueRow ? 1 : 0)])));
+      },
+      [this, continueRow](int index) {
+        return continueRow && index == 0 ? Book : home_menu::icon(menuItems.values[index - (continueRow ? 1 : 0)]);
+      });
 
   const auto labels = mappedInput.mapLabels(recentBooks.empty() ? "" : tr(STR_RESUME), tr(STR_SELECT), tr(STR_DIR_UP),
                                             tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (overflowPopup && overflowPopup->isActive()) {
+    overflowPopup->render(renderer);
+    renderer.displayBuffer();
+    firstRenderDone = true;
+    return;
+  }
 
   renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
 

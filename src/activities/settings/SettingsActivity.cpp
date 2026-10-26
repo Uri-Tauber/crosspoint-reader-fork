@@ -21,6 +21,7 @@
 #include "CrossPointSettings.h"
 #include "FontDownloadActivity.h"
 #include "HomeButtonSettingsActivity.h"
+#include "HomeMenuSettingsActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "KeyboardLayoutsActivity.h"
 #include "LanguageSelectActivity.h"
@@ -35,6 +36,7 @@
 #include "TextSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "components/HomeMenu.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
@@ -109,6 +111,7 @@ void SettingsActivity::rebuildSettings() {
   // Language leads so a user stuck in an unfamiliar language finds it first.
   addAction(SettingsSection::General, StrId::STR_LANGUAGE, SettingAction::Language);
   addAction(SettingsSection::General, StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts);
+  addAction(SettingsSection::Display, StrId::STR_HOME_MENU, SettingAction::HomeMenu);
   addAction(SettingsSection::Reader, StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings);
   addAction(SettingsSection::Reader, StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts);
   if (BoardConfig::hasHomeKey()) {
@@ -382,6 +385,7 @@ void SettingsActivity::toggleSelectedSetting() {
         optionPopup.show(StrId::STR_PLUGINS, OPTIONS, 3, SETTINGS.pluginsEnabled ? 0 : 1, [this](const int idx) {
           if (idx == 2) return;
           SETTINGS.pluginsEnabled = idx == 0 ? 1 : 0;
+          home_menu::refreshAvailability();
           // Turning plugins on brings back a dismissed Plugin Hub install row.
           if (SETTINGS.pluginsEnabled) SETTINGS.pluginHubPromptHidden = 0;
           SETTINGS.saveToFile();
@@ -392,6 +396,13 @@ void SettingsActivity::toggleSelectedSetting() {
         requestUpdate();
         return;
       }
+      case SettingAction::HomeMenu:
+        if (auto activity = makeUniqueNoThrow<HomeMenuSettingsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: HomeMenuSettingsActivity (%u bytes)", unsigned(sizeof(HomeMenuSettingsActivity)));
+        }
+        break;
       case SettingAction::KeyboardLayouts:
         if (auto activity = makeUniqueNoThrow<KeyboardLayoutsActivity>(renderer, mappedInput)) {
           startActivityForResult(std::move(activity), nullptr);

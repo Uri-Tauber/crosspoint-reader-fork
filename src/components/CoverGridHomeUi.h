@@ -10,6 +10,7 @@
 #include "components/bars/tab-bar.h"
 #include "components/media/book-card.h"
 #include "components/media/cover-grid.h"
+#include "util/HomeMenuSelection.h"
 
 class CoverGridHomeUi final : public UiAppHost {
  public:
@@ -19,7 +20,8 @@ class CoverGridHomeUi final : public UiAppHost {
   static constexpr int MAX_BOOKS = 1 + GRID_COLUMNS * GRID_ROWS;
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
   explicit CoverGridHomeUi(GfxRenderer& renderer);
-  void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading);
+  void begin(const std::vector<RecentBook>& books, const home_menu::Items& menu, bool hasContinueReading);
+  static int menuCapacity(const GfxRenderer& renderer);
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
   int selectedAction(const MappedInputManager& input);
@@ -52,7 +54,7 @@ class CoverGridHomeUi final : public UiAppHost {
   int selected = 0;
   int pending = -1;
   int progress = -1;
-  bool hasOpds = false;
+  home_menu::Items menu;
   bool hasContinueReading = false;
   char progressText[12]{};
   // Component styles and interaction tables stay off the render task's stack.
@@ -60,5 +62,5 @@ class CoverGridHomeUi final : public UiAppHost {
   freeink::ui::CoverGridProps grid;
   freeink::ui::Rect gridBounds{};
   freeink::ui::TabBarProps tabs;
-  std::array<freeink::ui::TabItem, 5> tabItems;
+  std::array<freeink::ui::TabItem, home_menu::COUNT> tabItems;
 };

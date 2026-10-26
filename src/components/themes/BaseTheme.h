@@ -190,7 +190,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeCoverTileHeight = 400,
                                  .homeRecentBooksCount = 1,
                                  .homeContinueReadingInMenu = false,
-                                 .homeMenuTopOffset = 10,
+                                 .homeMenuTopOffset = 20,
                                  .buttonHintsHeight = 40,
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
@@ -254,6 +254,9 @@ class BaseTheme {
   // grid from this, so hit bands always match the visuals (RoundedRaff derives
   // its row height from the font, not the metrics table).
   virtual int getMenuRowHeight(const GfxRenderer& renderer) const;
+  // Home drawing, touch and visibility limits use the same resolved layout.
+  virtual Rect getHomeMenuBounds(const GfxRenderer& renderer) const;
+  virtual int getHomeMenuCapacity(const GfxRenderer& renderer) const;
   // Also draws the wall clock opposite the battery when the user enabled
   // SETTINGS.clockShowInHeader and an RTC is present. On touch boards a
   // tappable back button leads the band (see HeaderBackTapTarget); root

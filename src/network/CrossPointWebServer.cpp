@@ -42,6 +42,7 @@
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
 #include "WifiPowerSaveGuard.h"
+#include "components/HomeMenu.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -1521,8 +1522,8 @@ void CrossPointWebServer::handlePostSettings() {
     }
   }
 
+  home_menu::refreshAvailability();
   SETTINGS.saveToFile();
-
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");
 }
@@ -1656,6 +1657,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
       server->send(400, "text/plain", "Cannot add server (limit reached)");
       return;
     }
+    if (home_menu::refreshAvailability()) SETTINGS.saveToFile();
     LOG_DBG("WEB", "Added new OPDS server: %s", opdsServer.name.c_str());
   }
 
@@ -1689,6 +1691,7 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
   }
 
   OPDS_STORE.removeServer(static_cast<size_t>(idx));
+  if (home_menu::refreshAvailability()) SETTINGS.saveToFile();
   LOG_DBG("WEB", "Deleted OPDS server at index %d", idx);
   server->send(200, "text/plain", "OK");
 }

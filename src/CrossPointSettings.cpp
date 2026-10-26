@@ -15,6 +15,7 @@
 #include "ReaderFontSizes.h"
 #include "SettingsList.h"
 #include "fontIds.h"
+#include "util/HomeMenuSelection.h"
 #include "util/ParagraphIndentMigration.h"
 #include "util/PluginLocations.h"
 
@@ -118,6 +119,8 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   if (keyboardLayouts != 0) {
     doc["keyboardLayouts"] = keyboardLayouts;
   }
+  doc["homeMenuItems"] = homeMenuItems;
+  doc["homeMenuAvailability"] = homeMenuAvailability;
 
   bleturner::writeJson(ble, doc);
 }
@@ -290,6 +293,8 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   if (doc["keyboardLayouts"].is<uint16_t>()) {
     keyboardLayouts = doc["keyboardLayouts"].as<uint16_t>();
   }
+  homeMenuItems = home_menu::normalize(doc["homeMenuItems"] | home_menu::DEFAULT_ITEMS);
+  homeMenuAvailability = (doc["homeMenuAvailability"] | home_menu::Mask{0}) & home_menu::ALL_ITEMS;
 
   if (!bleturner::readJson(ble, doc)) {
     needsResave = true;

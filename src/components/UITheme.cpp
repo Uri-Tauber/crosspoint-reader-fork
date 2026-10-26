@@ -34,6 +34,10 @@ bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes 
 
 bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
 
+int UITheme::getHomeMenuCapacity(const GfxRenderer& renderer) const {
+  return hasCoverGridHome() ? CoverGridHomeUi::menuCapacity(renderer) : getTheme().getHomeMenuCapacity(renderer);
+}
+
 void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
 
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {

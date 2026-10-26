@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/HomeMenu.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -91,6 +92,7 @@ bool OpdsSettingsActivity::saveServer() {
   }
 
   showSaveError = !success;
+  if (home_menu::refreshAvailability()) SETTINGS.saveToFile();
   if (showSaveError) {
     requestUpdate();
   }
@@ -178,6 +180,7 @@ void OpdsSettingsActivity::handleSelection() {
       requestUpdate();
       return;
     }
+    if (home_menu::refreshAvailability()) SETTINGS.saveToFile();
     finish();
   }
 }

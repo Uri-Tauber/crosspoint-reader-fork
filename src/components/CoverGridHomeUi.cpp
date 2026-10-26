@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <utility>
 
+#include "HomeMenu.h"
 #include "MappedInputManager.h"
 #include "UITheme.h"
 #include "icons/blocks.h"
@@ -25,14 +26,42 @@ constexpr fui::ActionId SELECT = 1;
 // inset so the cover columns land on the header chrome's inset line.
 constexpr int16_t COVER_CELL_INSET = 6;
 constexpr int COVER_ROW_EXTRA_HEIGHT = 8;
+constexpr int TAB_ICON_SIZE = 32;
+constexpr int TAB_TOUCH_SIZE = 44;
+constexpr fui::Insets TAB_INSET{4, 4, 8, 4};
+constexpr fui::Insets TAB_CONTENT_INSET{4, 4, 4, 4};
+
+Rect menuBounds(const GfxRenderer& renderer) {
+  const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true);
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& board = BoardConfig::ACTIVE;
+  const int left = std::max(safe.x, int(board.cornerRadius));
+  const int right = std::max(renderer.getScreenWidth() - safe.x - safe.width, int(board.cornerRadius));
+  const int inset = std::max(0, metrics.headerSidePadding - COVER_CELL_INSET - left) + COVER_CELL_INSET;
+  const int width = std::max(0, renderer.getScreenWidth() - left - right - 2 * inset);
+  const int fitted = width * board.tabBarWidthPct / 100;
+  return Rect{left + inset + (width - fitted) / 2, 0, fitted,
+              metrics.coverGridTabBarHeight * board.tabBarHeightPct / 100};
+}
+
+int menuSlotWidth(const GfxRenderer& renderer) {
+  const int horizontalInset = TAB_INSET.left + TAB_INSET.right;
+  const int contentWidth = TAB_ICON_SIZE + TAB_CONTENT_INSET.left + TAB_CONTENT_INSET.right;
+  const int pillWidth = std::max(contentWidth, menuBounds(renderer).height - TAB_INSET.top - TAB_INSET.bottom);
+  return std::max(TAB_TOUCH_SIZE, pillWidth + horizontalInset);
+}
 }  // namespace
 
 CoverGridHomeUi::CoverGridHomeUi(GfxRenderer& renderer)
     : UiAppHost(renderer), coverCache(renderer), renderer(renderer) {}
 
-void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bool continuing) {
+int CoverGridHomeUi::menuCapacity(const GfxRenderer& renderer) {
+  return std::max(1, home_menu::slotsThatFit(menuBounds(renderer).width, menuSlotWidth(renderer), 0));
+}
+
+void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, const home_menu::Items& actions, bool continuing) {
   books = &recent;
-  hasOpds = opds;
+  menu = actions;
   hasContinueReading = continuing;
   if (!recent.empty()) coverCache.begin();
   resetUi();
@@ -122,15 +151,11 @@ void CoverGridHomeUi::draw(UiScreen& screen) {
   const auto tabHeight = static_cast<int16_t>(tabRect.height * board.tabBarHeightPct / 100);
   tabRect.y = static_cast<int16_t>(tabRect.y + tabRect.height - tabHeight + board.tabBarOffsetY);
   tabRect.height = tabHeight;
-  // The board's share of the row the tabs spread across, centered.
-  const auto fitTabWidth = [&board](fui::Rect rect) {
-    const auto width = static_cast<int16_t>(rect.width * board.tabBarWidthPct / 100);
-    rect.x = static_cast<int16_t>(rect.x + (rect.width - width) / 2);
-    rect.width = width;
-    return rect;
-  };
+  const auto menuRect = menuBounds(renderer);
+  tabRect.x = menuRect.x;
+  tabRect.width = menuRect.width;
   if (books->empty()) {
-    drawTabs(screen, fitTabWidth(tabRect.inset(fui::Insets{0, COVER_CELL_INSET, 0, COVER_CELL_INSET})));
+    drawTabs(screen, tabRect);
     drawEmpty(screen);
     drawHeaderBand();
     return;
@@ -148,9 +173,7 @@ void CoverGridHomeUi::draw(UiScreen& screen) {
                                                      screen.target().lineHeight(theme.smallText.font) * 2 + 32));
   drawCurrent(screen, screen.takeTop(featuredHeight, theme.spaceSm), coverRowHeight);
   drawGrid(screen);
-  tabRect.x = gridBounds.x + grid.cellInset.left;
-  tabRect.width = gridBounds.width - grid.cellInset.left - grid.cellInset.right;
-  drawTabs(screen, fitTabWidth(tabRect));
+  drawTabs(screen, tabRect);
   drawHeaderBand();
 }
 
@@ -284,33 +307,51 @@ void CoverGridHomeUi::drawGrid(UiScreen& screen) {
 
 void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
   static constexpr const uint8_t* ICONS[] = {FolderIcon, LibraryIcon, BlocksIcon, TransferIcon, Settings2Icon};
-  int count = 0;
-  for (int i = 0; i < 5; ++i) {
-    if (i == 2 && !hasOpds) continue;
-    auto& tab = tabItems[count];
-    tab.value = books->size() + count;
+  for (int i = 0; i < menu.size; ++i) {
+    auto& tab = tabItems[i];
+    tab.value = books->size() + i;
     tab.selected = selected == tab.value;
     tab.label = nullptr;
-    ++count;
   }
   tabs.tabs = tabItems.data();
-  tabs.count = count;
+  tabs.count = menu.size;
   tabs.layout = fui::TabBarLayout::SpaceBetween;
   tabs.action = SELECT;
   tabs.inputMask = fui::InputTouch;
-  tabs.iconSize = 32;
+  tabs.iconSize = TAB_ICON_SIZE;
+  tabs.minTouchSize = TAB_TOUCH_SIZE;
+  tabs.tabInset = TAB_INSET;
+  tabs.contentInset = TAB_CONTENT_INSET;
   tabs.iconPainterUserData = this;
   tabs.iconPainter = [](fui::DrawTarget&, fui::Rect iconRect, const fui::TabItem& tab, uint8_t, void* user) {
     const auto& self = *static_cast<CoverGridHomeUi*>(user);
     const int index = tab.value - static_cast<int>(self.books->size());
-    const int icon = !self.hasOpds && index >= 2 ? index + 1 : index;
+    int icon = 0;
+    switch (self.menu.values[index]) {
+      case home_menu::Item::Files:
+        icon = 0;
+        break;
+      case home_menu::Item::Library:
+        icon = 1;
+        break;
+      case home_menu::Item::Opds:
+      case home_menu::Item::Plugins:
+        icon = 2;
+        break;
+      case home_menu::Item::Transfer:
+        icon = 3;
+        break;
+      case home_menu::Item::Settings:
+        icon = 4;
+        break;
+    }
     self.renderer.drawIcon(ICONS[icon], iconRect.x, iconRect.y, iconRect.width);
     return true;
   };
   // No pill fill; the underline marks the selected tab.
   tabs.tabStyles.explicitlySet = true;
   tabs.selectedUnderline = 2;
-  tabs.distributedSlotWidth = 0;
+  tabs.distributedSlotWidth = menuSlotWidth(renderer);
   fui::tabBar(screen.frame(), rect, tabs);
 }
 
