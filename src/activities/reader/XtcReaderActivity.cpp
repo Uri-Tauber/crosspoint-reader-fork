@@ -50,8 +50,9 @@ bool XtcReaderActivity::handleFormatInput() {
   }
 
   // Enter chapter selection activity on Confirm release or touch menu gesture
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
-      ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
+  const bool touchMenu = ReaderUtils::isTouchMenuGesture(renderer, mappedInput);
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || touchMenu) {
+    if (touchMenu && xtc->hasChapters() && !xtc->getChapters().empty()) haptic_feedback::touchAction();
     openChapterSelection();
     return true;
   }
@@ -255,6 +256,7 @@ void XtcReaderActivity::renderPage() {
     free(pageBuffer);
 
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
+    markPageRendered();
     return;
   } else {
     const size_t srcRowBytes = (pageWidth + 7) / 8;
@@ -285,6 +287,7 @@ void XtcReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
+  markPageRendered();
 }
 
 bool XtcReaderActivity::pageTurn(bool isForward) {
@@ -362,6 +365,8 @@ ScreenshotInfo XtcReaderActivity::getScreenshotInfo() const {
     info.totalPages = pageCount;
     uint32_t clampedPage = (pageCount > 0 && currentPage >= pageCount) ? pageCount - 1 : currentPage;
     info.progressPercent = pageCount > 0 ? xtc->calculateProgress(clampedPage) : 0;
+    // XTC progress already counts the visible page as read.
+    info.endProgressPercent = info.progressPercent;
     info.currentPage = static_cast<int>(clampedPage) + 1;
   } else {
     info.currentPage = currentPage + 1;
